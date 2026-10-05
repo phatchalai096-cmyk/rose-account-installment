@@ -219,12 +219,23 @@ exports.handler = async (event) => {
     if (!easyKey) throw new Error('ยังไม่ได้ตั้งค่า EASYSLIP_API_KEY ใน Netlify');
 
     const isTrueWallet = String(selectedAccount?.bank_name || '').toLowerCase().replace(/\s+/g,'').includes('truemoney');
-    const form = new FormData();
-    form.append('image', new Blob([file.buffer], { type:file.mimeType }), file.filename);
-    form.append('matchAccount', 'true');
-    form.append('checkDuplicate', 'true');
+    // Use EasySlip v2 Base64 JSON input instead of server-side multipart FormData.
+    // This avoids Node/Netlify multipart boundary issues that can cause EasySlip to
+    // receive no image field and return: 'Please provide either ... an image file ...'.
+    const base64 = `data:${file.mimeType};base64,${file.buffer.toString('base64')}`;
     const endpoint = isTrueWallet ? 'https://api.easyslip.com/v2/verify/truewallet' : 'https://api.easyslip.com/v2/verify/bank';
-    const esResp = await fetch(endpoint, { method:'POST', headers:{ Authorization:`Bearer ${easyKey}` }, body:form });
+    const esResp = await fetch(endpoint, {
+      method:'POST',
+      headers:{
+        Authorization:`Bearer ${easyKey}`,
+        'Content-Type':'application/json'
+      },
+      body:JSON.stringify({
+        base64,
+        matchAccount:true,
+        checkDuplicate:true
+      })
+    });
     const esText = await esResp.text();
     let es = null; try { es = JSON.parse(esText); } catch {}
     if (!esResp.ok || es?.success !== true) {
