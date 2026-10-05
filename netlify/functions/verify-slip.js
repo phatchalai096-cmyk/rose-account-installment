@@ -175,6 +175,7 @@ exports.handler = async (event) => {
     const productId = clean(fields.productId);
 
     let selectedAccount = null;
+    let allowedInstallmentAccounts = [];
     let plan = null;
     let customer = null;
 
@@ -187,13 +188,17 @@ exports.handler = async (event) => {
       if (!customer?.is_active) return json(400, { ok:false, message:'ลูกค้ารายนี้ถูกปิดใช้งาน' });
       if (!submittedCustomerCode || normText(submittedCustomerCode) !== normText(customer.customer_code)) return json(403,{ok:false,code:'CUSTOMER_CODE_REQUIRED',message:'กรุณากรอกรหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด'});
       const allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
-      const requestedBank=bankAccountId||allowedBankIds[0]||'';
       if(!allowedBankIds.length)return json(400,{ok:false,message:'รายการผ่อนนี้ยังไม่ได้กำหนดช่องทางโอน'});
-      if(!allowedBankIds.includes(requestedBank))return json(400,{ok:false,code:'INSTALLMENT_BANK_NOT_ALLOWED',message:'ช่องทางโอนที่เลือกไม่ใช่ช่องทางของรายการผ่อนนี้'});
-      const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=eq.${encodeURIComponent(requestedBank)}&is_active=eq.true&limit=1`);
+      const inList=allowedBankIds.map(id=>encodeURIComponent(id)).join(',');
+      const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=in.(${inList})&is_active=eq.true`);
       const aJson=await getJson(aResp);
-      if(!aResp.ok||!aJson.data?.[0])return json(400,{ok:false,message:'ช่องทางรับเงินของรายการผ่อนนี้ไม่พร้อมใช้งาน'});
-      selectedAccount=aJson.data[0];
+      if(!aResp.ok||!Array.isArray(aJson.data)||!aJson.data.length)return json(400,{ok:false,message:'ช่องทางรับเงินของรายการผ่อนนี้ไม่พร้อมใช้งาน'});
+      allowedInstallmentAccounts=aJson.data;
+      if(bankAccountId){
+        if(!allowedBankIds.includes(bankAccountId))return json(400,{ok:false,code:'INSTALLMENT_BANK_NOT_ALLOWED',message:'ช่องทางโอนที่เลือกไม่ใช่ช่องทางของรายการผ่อนนี้'});
+        selectedAccount=allowedInstallmentAccounts.find(a=>String(a.id)===String(bankAccountId))||null;
+        if(!selectedAccount)return json(400,{ok:false,message:'ช่องทางรับเงินที่เลือกไม่พร้อมใช้งาน'});
+      }
     } else if (bankAccountId) {
       const aResp = await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=eq.${encodeURIComponent(bankAccountId)}&is_active=eq.true&limit=1`);
       const aJson = await getJson(aResp);
@@ -225,10 +230,28 @@ exports.handler = async (event) => {
     const receiver = receiverIdentifiers(d, raw);
     const payerName = sender.name;
     const receiverName = receiver.name;
-    const receiverBank = receiver.bank || (isTrueWallet ? 'TrueMoney Wallet' : null);
+    let receiverBank = receiver.bank || (isTrueWallet ? 'TrueMoney Wallet' : null);
     const amount = d.amountInSlip ?? raw?.amount?.amount ?? null;
     const transferDateTime = raw?.date || null;
     const reference = raw?.transRef || raw?.transactionId || null;
+
+    // Installment uploads from the public page do not require the customer to choose a channel.
+    // Match the verified receiver against either of the two bank accounts configured on the plan.
+    if (installmentPlanId && !selectedAccount && allowedInstallmentAccounts.length) {
+      const matchesAccountNumber = (accountNumber) => {
+        const expected = normDigits(accountNumber);
+        return expected && receiver.identifiers.some(v => v === expected || (expected.length >= 8 && v.endsWith(expected)) || (v.length >= 8 && expected.endsWith(v)));
+      };
+      selectedAccount = allowedInstallmentAccounts.find(a => matchesAccountNumber(a.account_number)) || null;
+      if (selectedAccount) receiverBank = receiver.bank || selectedAccount.bank_name || null;
+      if (!selectedAccount) {
+        await supaFetch('/rest/v1/rpc/process_verified_payment', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({p_payer_name:payerName||null,p_receiver_name:receiverName||null,p_receiver_bank:receiverBank,p_amount:amount==null?null:Number(amount),p_date_time:transferDateTime||null,p_reference:reference||null,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน'})
+        }).catch(()=>{});
+        return json(400,{ok:false,code:'RECEIVER_ACCOUNT_MISMATCH',message:'สลิปนี้โอนเข้าบัญชีไม่ตรงกับช่องทางรับเงินที่กำหนดของรายการผ่อน จึงไม่นับยอด'});
+      }
+    }
 
     // Product-selected installment flow: match the payer name to exactly one active plan for the selected product.
     if (productId && !installmentPlanId) {
@@ -245,13 +268,17 @@ exports.handler = async (event) => {
       customer = matches[0].customers;
       if (!submittedCustomerCode || normText(submittedCustomerCode) !== normText(customer.customer_code)) return json(403,{ok:false,code:'CUSTOMER_CODE_REQUIRED',message:'กรุณากรอกรหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด'});
       const allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
-      const requestedBank=bankAccountId||allowedBankIds[0]||'';
       if(!allowedBankIds.length)return json(400,{ok:false,message:'รายการผ่อนนี้ยังไม่ได้กำหนดช่องทางโอน'});
-      if(!allowedBankIds.includes(requestedBank))return json(400,{ok:false,code:'INSTALLMENT_BANK_NOT_ALLOWED',message:'ช่องทางโอนที่เลือกไม่ใช่ช่องทางของรายการผ่อนนี้'});
-      const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=eq.${encodeURIComponent(requestedBank)}&is_active=eq.true&limit=1`);
+      const inList=allowedBankIds.map(id=>encodeURIComponent(id)).join(',');
+      const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=in.(${inList})&is_active=eq.true`);
       const aJson=await getJson(aResp);
-      if(!aResp.ok||!aJson.data?.[0])return json(400,{ok:false,message:'ช่องทางรับเงินของรายการผ่อนนี้ไม่พร้อมใช้งาน'});
-      selectedAccount=aJson.data[0];
+      if(!aResp.ok||!Array.isArray(aJson.data)||!aJson.data.length)return json(400,{ok:false,message:'ช่องทางรับเงินของรายการผ่อนนี้ไม่พร้อมใช้งาน'});
+      allowedInstallmentAccounts=aJson.data;
+      if(bankAccountId){
+        if(!allowedBankIds.includes(bankAccountId))return json(400,{ok:false,code:'INSTALLMENT_BANK_NOT_ALLOWED',message:'ช่องทางโอนที่เลือกไม่ใช่ช่องทางของรายการผ่อนนี้'});
+        selectedAccount=allowedInstallmentAccounts.find(a=>String(a.id)===String(bankAccountId))||null;
+        if(!selectedAccount)return json(400,{ok:false,message:'ช่องทางรับเงินที่เลือกไม่พร้อมใช้งาน'});
+      }
     }
 
     if (!receiverNameAllowed(receiverName)) {
