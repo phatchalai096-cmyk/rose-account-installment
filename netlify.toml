@@ -1,0 +1,13 @@
+[build]
+  publish = "."
+
+[functions]
+  directory = "netlify/functions"
+
+[functions.cleanup-payments]
+  schedule = "@daily"
+
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
