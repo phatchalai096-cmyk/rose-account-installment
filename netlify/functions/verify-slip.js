@@ -187,7 +187,16 @@ exports.handler = async (event) => {
       customer = plan.customers;
       if (!customer?.is_active) return json(400, { ok:false, message:'ลูกค้ารายนี้ถูกปิดใช้งาน' });
       if (!submittedCustomerCode || normText(submittedCustomerCode) !== normText(customer.customer_code)) return json(403,{ok:false,code:'CUSTOMER_CODE_REQUIRED',message:'กรุณากรอกรหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด'});
-      const allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
+      let allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
+      if(!allowedBankIds.length){
+        const fb=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&is_active=eq.true&order=created_at.asc&limit=2`);
+        const fj=await getJson(fb);
+        allowedBankIds=(Array.isArray(fj.data)?fj.data:[]).slice(0,2).map(x=>x.id);
+      }else if(allowedBankIds.length<2){
+        const fb=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&is_active=eq.true&order=created_at.asc&limit=2`);
+        const fj=await getJson(fb);
+        for(const b of (Array.isArray(fj.data)?fj.data:[])){if(allowedBankIds.length>=2)break;if(!allowedBankIds.includes(b.id))allowedBankIds.push(b.id)}
+      }
       if(!allowedBankIds.length)return json(400,{ok:false,message:'รายการผ่อนนี้ยังไม่ได้กำหนดช่องทางโอน'});
       const inList=allowedBankIds.map(id=>encodeURIComponent(id)).join(',');
       const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=in.(${inList})&is_active=eq.true`);
@@ -267,7 +276,16 @@ exports.handler = async (event) => {
       plan = matches[0];
       customer = matches[0].customers;
       if (!submittedCustomerCode || normText(submittedCustomerCode) !== normText(customer.customer_code)) return json(403,{ok:false,code:'CUSTOMER_CODE_REQUIRED',message:'กรุณากรอกรหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด'});
-      const allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
+      let allowedBankIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
+      if(!allowedBankIds.length){
+        const fb=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&is_active=eq.true&order=created_at.asc&limit=2`);
+        const fj=await getJson(fb);
+        allowedBankIds=(Array.isArray(fj.data)?fj.data:[]).slice(0,2).map(x=>x.id);
+      }else if(allowedBankIds.length<2){
+        const fb=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&is_active=eq.true&order=created_at.asc&limit=2`);
+        const fj=await getJson(fb);
+        for(const b of (Array.isArray(fj.data)?fj.data:[])){if(allowedBankIds.length>=2)break;if(!allowedBankIds.includes(b.id))allowedBankIds.push(b.id)}
+      }
       if(!allowedBankIds.length)return json(400,{ok:false,message:'รายการผ่อนนี้ยังไม่ได้กำหนดช่องทางโอน'});
       const inList=allowedBankIds.map(id=>encodeURIComponent(id)).join(',');
       const aResp=await supaFetch(`/rest/v1/bank_accounts?select=id,bank_name,account_name,account_number,is_active,qr_url&id=in.(${inList})&is_active=eq.true`);
