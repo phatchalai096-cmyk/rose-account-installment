@@ -90,8 +90,12 @@ exports.handler = async (event) => {
     const qs = event.queryStringParameters || {};
     const token = String(qs.token || '');
     const payload = verifyToken(token);
-    const okAdmin = await isAdmin(base, serviceKey, getBearer(event));
+   const okAdmin = await isAdmin(base, serviceKey, getBearer(event));
 
+if (!okAdmin) {
+  // อนุญาตการเปิดด้วย HMAC token ที่สร้างจาก admin-slips.js
+  // เพราะการเปิดแท็บใหม่อาจไม่มี Authorization header
+}
     // Normal browser opens do not carry Authorization headers. The HMAC token is only
     // minted by admin-slips after a verified admin request and expires quickly, so it can
     // be used as the second factor for viewing the private object.
