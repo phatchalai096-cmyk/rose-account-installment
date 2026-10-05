@@ -43,6 +43,28 @@ main{width:100%;max-width:1100px;}
 @media(max-width:560px){.product-filter-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.product-filter-tab{font-size:12px;padding:9px 5px}.product-filter-tab span{display:block;margin:2px 0 0}}
 </style>
 
+
+<style id="installment-flow-v13">
+.confirm-card{width:min(680px,100%);max-height:92vh;overflow:auto;background:#fffdfd;border-radius:28px;border:1px solid #efdad7;box-shadow:0 30px 100px rgba(0,0,0,.2)}
+.confirm-head{padding:24px;background:linear-gradient(145deg,#ffdfe7,#e7f6fa,#e7ddf7)}
+.confirm-head h2{margin:0 0 6px;font-size:24px}
+.confirm-body{padding:20px}
+.confirm-code-box{padding:14px;border:1px solid var(--line);border-radius:16px;background:#fff8f9}
+.confirm-details{display:grid;gap:8px;margin-top:14px}
+.confirm-row{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px dashed var(--line)}
+.confirm-row span{color:var(--muted)}.confirm-row b{text-align:right;max-width:68%;word-break:break-word}
+.confirm-bank-list{display:grid;gap:8px;margin-top:10px}.confirm-bank{padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}.confirm-actions .btn{margin:0}
+.confirm-hint{margin-top:12px;padding:12px;border-radius:14px;background:#fff7df;color:#7f6414;font-weight:700}
+.slip-ready{display:none;margin-top:10px;padding:12px 14px;border:1px solid #d9e7ec;border-radius:14px;background:#eef8fb;font-weight:800}
+.history-wrap{margin-top:12px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+.history-table{width:100%;border-collapse:collapse;font-size:12px;min-width:560px}.history-table th,.history-table td{padding:9px 10px;border-bottom:1px dashed var(--line);text-align:left;white-space:nowrap}.history-table th{background:#fff6f8;font-weight:900;color:var(--primary-dark)}.history-table tr:last-child td{border-bottom:0}
+.history-total{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.history-total .mini{padding:10px}
+.history-receipt{width:min(560px,100%);max-height:92vh;overflow:auto;background:#fffdfd;border-radius:28px;border:1px solid #efdad7;box-shadow:0 30px 100px rgba(0,0,0,.2)}
+.receipt-history-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}.receipt-history-table th,.receipt-history-table td{padding:8px;border-bottom:1px dashed var(--line);text-align:left}.receipt-history-table th{background:#fff6f8}
+@media(max-width:560px){.confirm-card{width:calc(100vw - 20px);max-height:96vh;border-radius:22px}.confirm-body{padding:14px}.confirm-head{padding:20px 14px}.confirm-row{flex-direction:column;gap:4px}.confirm-row b{max-width:100%;text-align:left}.confirm-actions{grid-template-columns:1fr}.history-total{grid-template-columns:1fr}}
+</style>
+
 </head>
 <body>
 <div id="floatingEmojis" aria-hidden="true"></div><div id="clickBurstLayer" aria-hidden="true"></div>
@@ -58,7 +80,7 @@ main{width:100%;max-width:1100px;}
 </section>
 <section class="card">
 <h2 id="slipTitle">📎 แจ้งชำระเงิน</h2><p class="muted" id="slipText">แนบสลิปจริง ระบบอ่านชื่อผู้โอน ชื่อผู้รับ ยอดเงิน วันเวลา และเลขอ้างอิงจากสลิป</p>
-<label class="upload" for="slipFile"><input id="slipFile" type="file" accept="image/jpeg,image/png,image/gif,image/webp"><strong>📤 คลิกเพื่อเลือกสลิป</strong><span id="fileName" class="muted">JPG, PNG, GIF, WebP • ไม่เกิน 4 MB • ผ่อน: ต้องเป็นสลิปวันที่ปัจจุบัน</span></label>
+<label class="upload" for="slipFile"><input id="slipFile" type="file" accept="image/jpeg,image/png,image/gif,image/webp"><strong>📤 คลิกเพื่อเลือกสลิป</strong><span id="fileName" class="muted">JPG, PNG, GIF, WebP • ไม่เกิน 4 MB • ผ่อน: ต้องเป็นสลิปวันที่ปัจจุบัน</span></label><div id="slipReady" class="slip-ready"></div>
 <button class="btn" id="verifyBtn">🔎 ตรวจสอบสลิปและส่งข้อมูล</button><div id="verifyStatus"></div>
 </section>
 </div>
@@ -70,9 +92,55 @@ main{width:100%;max-width:1100px;}
 <div id="selectedPlanHint" class="status warn" style="display:none"></div>
 </section>
 </main>
+
+<div class="modal" id="installmentConfirmModal">
+  <div class="confirm-card" id="installmentConfirmCard">
+    <div class="confirm-head">
+      <h2>💸 ส่งยอดผ่อน</h2>
+      <div class="muted">กรอกรหัสลูกค้าเพื่อยืนยันสิทธิ์ ก่อนตัดยอดจะตรวจสอบสลิปและแสดงรายละเอียดทั้งหมดให้ตรวจสอบอีกครั้ง</div>
+    </div>
+    <div class="confirm-body">
+      <div class="confirm-code-box">
+        <label class="label" for="confirmCustomerCode">🔐 รหัสลูกค้า</label>
+        <input id="confirmCustomerCode" class="input" placeholder="กรอกรหัสลูกค้า">
+        <div id="confirmCodeStatus" class="muted" style="margin-top:7px">ต้องตรงกับรหัสของรายการผ่อน</div>
+      </div>
+      <div id="confirmDetailsHint" class="confirm-hint">เมื่อกด “ตรวจสอบและแสดงรายละเอียด” ระบบจะตรวจสลิปกับ EasySlip ก่อน โดยยังไม่ตัดยอด</div>
+      <div id="confirmDetails" class="confirm-details" style="display:none"></div>
+      <div class="confirm-actions">
+        <button type="button" class="btn-soft" id="cancelInstallmentConfirm">ยกเลิก</button>
+        <button type="button" class="btn" id="previewInstallmentBtn">🔎 ตรวจสอบและแสดงรายละเอียด</button>
+      </div>
+      <div class="confirm-actions" id="confirmSendActions" style="display:none">
+        <button type="button" class="btn-soft" id="cancelInstallmentConfirm2">ยกเลิก</button>
+        <button type="button" class="btn" id="confirmSendBtn">✅ ส่งยอดและตัดยอดผ่อน</button>
+      </div>
+      <div id="installmentConfirmStatus"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="historyReceiptModal">
+  <div class="history-receipt" id="historyReceiptCard">
+    <div class="receipt-head">
+      <div class="check">✓</div>
+      <h2>🧾 ใบเสร็จการผ่อน</h2>
+      <div class="muted">สรุปยอดผ่อนของลูกค้ารายการนี้</div>
+    </div>
+    <div class="receipt-body">
+      <div id="historyReceiptSummary"></div>
+      <div id="historyReceiptRows"></div>
+      <div class="receipt-actions" style="grid-template-columns:1fr">
+        <button class="btn" id="saveHistoryReceipt">💾 บันทึกใบเสร็จการผ่อน</button>
+      </div>
+      <button class="close" id="closeHistoryReceipt">ปิด</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="receiptModal"><div class="receipt" id="receiptCard"><div class="receipt-head"><div class="check">✓</div><h2>🌸 ชำระเงินสำเร็จ</h2><div class="muted">ตรวจสอบสลิปเรียบร้อยแล้ว</div></div><div class="receipt-body"><div class="receipt-amount"><span>ยอดที่ชำระ</span><strong id="rAmount">0.00 บาท</strong></div><div id="rRows"></div><div class="receipt-actions"><button class="btn" id="saveReceipt">💾 บันทึกใบเสร็จ</button><button class="btn" id="saveSlip">📎 บันทึกสลิป</button></div><button class="close" onclick="document.getElementById('receiptModal').classList.remove('show')">ปิด</button></div></div></div>
 <script>
-const $=id=>document.getElementById(id);let banks=[],selectedBank=null,activePlan=null,selectedProductId=null,slipFile=null,lastResult=null,settings={};
+const $=id=>document.getElementById(id);let banks=[],selectedBank=null,activePlan=null,selectedProductId=null,slipFile=null,lastResult=null,settings={},installmentPreviewToken=null,installmentPreviewData=null;
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
 async function loadSettings(){try{const r=await fetch('/.netlify/functions/public-settings',{cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.error||'โหลดการตั้งค่าไม่สำเร็จ');settings=d;banks=Array.isArray(d.banks)?d.banks:[];applySite(d.site||{});applyTheme(d.theme||{},d.motion||{});if(banks.length){$('bankSelect').innerHTML=banks.map(b=>`<option value="${esc(b.id)}">${esc(b.bank_name)} • ${esc(b.account_name)}</option>`).join('');selectedBank=banks[0];renderBank()}else $('bankSelect').innerHTML='<option value="">ยังไม่มีบัญชีรับเงินที่เปิดใช้งาน</option>';}catch(e){$('bankSelect').innerHTML='<option value="">โหลดช่องทางไม่สำเร็จ</option>';$('bankView').innerHTML=`<div class="status bad">${esc(e.message)}</div>`}}
 function applySite(site){const set=(id,val)=>{const el=$(id);if(el)el.textContent=val||''};if('brand_name'in site)set('brandName',site.brand_name);if('hero_title'in site)$('heroTitle').innerHTML=esc(site.hero_title||'').replace(/\n|\r?\n/g,'<br>');if('hero_text'in site)set('heroText',site.hero_text);if('hero_badge'in site)set('heroBadge',site.hero_badge);if('pay_title'in site)set('payTitle',site.pay_title);if('pay_text'in site){const pd=$('payDescription');if(pd){pd.textContent=site.pay_text||'';pd.style.display=site.pay_text?'block':'none';}}if('bank_title'in site)set('bankTitle',site.bank_title);if('bank_text'in site)set('bankText',site.bank_text);if('slip_title'in site)set('slipTitle',site.slip_title);if('slip_text'in site)set('slipText',site.slip_text);if('products_title'in site)set('productsTitle',site.products_title);if('products_text'in site)set('productsText',site.products_text);if('verify_text'in site&&site.verify_text)$('verifyBtn').textContent=site.verify_text;if('guest_text'in site&&site.guest_text)document.querySelector('.guest').textContent=site.guest_text;const logo=$('brandLogo');if(logo){logo.innerHTML='';const src=site.logo_data_url||site.logo_url||'';if(src)logo.innerHTML='<img src=\"'+esc(src)+'\" alt=\"logo\">';else logo.textContent='🌹';logo.style.cursor=site.logo_link_url?'pointer':'';logo.onclick=site.logo_link_url?()=>window.open(site.logo_link_url,'_blank','noopener,noreferrer'):null;}applyBanner(site)}
@@ -81,22 +149,127 @@ window.addEventListener('resize',()=>applyBanner(settings.site||{}));
 function applyTheme(theme,motion){if(theme.primary)document.documentElement.style.setProperty('--primary',theme.primary);if(theme.primary_dark)document.documentElement.style.setProperty('--primary-dark',theme.primary_dark);if(theme.bg)document.body.style.background=theme.bg;const bg=motion.background||'float';document.body.dataset.motion=bg;setTimeout(setupMotion,0);applyMotionSpeed(motion.speed||'normal')}
 function renderBank(){if(!selectedBank){$('bankView').innerHTML='<div class="muted">เลือกช่องทางการโอน</div>';return}$('bankView').innerHTML=`<div class="account-top"><div><div style="font-weight:900;font-size:19px">${esc(selectedBank.account_name)}</div><div class="muted">${esc(selectedBank.bank_name)}</div><div style="font-size:22px;font-weight:900;margin-top:10px;word-break:break-word">${esc(selectedBank.account_number)}</div><button class="copy" onclick="navigator.clipboard?.writeText(${JSON.stringify(selectedBank.account_number)})">คัดลอกเลขบัญชี</button></div>${selectedBank.qr_url?(selectedBank.qr_link_url?`<a class="image-link" href="${esc(selectedBank.qr_link_url)}" target="_blank" rel="noopener noreferrer"><img class="qr" src="${esc(selectedBank.qr_url)}" alt="QR"></a>`:`<img class="qr" src="${esc(selectedBank.qr_url)}" alt="QR">`):'<div class="qr" style="display:grid;place-items:center;color:#9c8581">ยังไม่มี QR</div>'}</div>`}
 $('bankSelect').addEventListener('change',e=>{const id=e.target.value;if(activePlan){const candidate=frontProducts.flatMap(p=>p.plan?.bank_accounts||[]).find(b=>b.id===id);selectedBank=candidate||banks.find(b=>b.id===id)||null;renderBank();return}selectedBank=banks.find(b=>b.id===id)||null;selectedProductId=null;activePlan=null;$('bankSelect').disabled=false;document.querySelectorAll('.product-card').forEach(el=>el.classList.remove('selected-product'));$('selectedPlanHint').style.display='none';renderBank()});
-$('slipFile').addEventListener('change',e=>{slipFile=e.target.files?.[0]||null;$('fileName').textContent=slipFile?slipFile.name:'JPG, PNG, GIF, WebP • ไม่เกิน 4 MB';if(slipFile&&activePlan?.plan_id&&$('customerCodeLookup').value.trim()){setTimeout(()=>$('verifyBtn').click(),120);}});
-function status(kind,msg){$('verifyStatus').innerHTML=`<div class="status ${kind}">${esc(msg)}</div>`}
-$('verifyBtn').onclick=async()=>{
-  if(activePlan?.plan_id){
-    const entered=$('customerCodeLookup').value.trim();
-    if(!entered){status('warn','กรุณากรอกรหัสลูกค้าก่อนส่งยอดผ่อน');$('customerCodeLookup').focus();return}
-    if(String(entered).toLowerCase()!==String(activePlan.customer_code||'').toLowerCase()){status('bad','รหัสลูกค้าไม่ตรงกับรายการผ่อนนี้');$('customerCodeLookup').focus();return}
+$('slipFile').addEventListener('change',e=>{
+  slipFile=e.target.files?.[0]||null;
+  installmentPreviewToken=null; installmentPreviewData=null;
+  $('fileName').textContent=slipFile?slipFile.name:'JPG, PNG, GIF, WebP • ไม่เกิน 4 MB • ผ่อน: ต้องเป็นสลิปวันที่ปัจจุบัน';
+  if(slipFile&&activePlan?.plan_id){
+    $('verifyBtn').textContent='💸 ส่งยอดผ่อน';
+    $('verifyBtn').disabled=false;
+    $('slipReady').style.display='block';
+    $('slipReady').textContent=`📎 แนบสลิปแล้ว: ${slipFile.name} • กด “💸 ส่งยอดผ่อน” เพื่อกรอกรหัสและตรวจสอบก่อนตัดยอด`;
+    status('ok','แนบสลิปเรียบร้อยแล้ว ✓ ยังไม่ตัดยอดจนกว่าจะกด “ส่งยอดและตัดยอดผ่อน”');
   }
+});
+function status(kind,msg){$('verifyStatus').innerHTML=`<div class="status ${kind}">${esc(msg)}</div>`}
+async function verifyNormalPayment(){
   if(!slipFile){status('warn','กรุณาเลือกสลิปก่อน');return}
   if(slipFile.size>4*1024*1024){status('bad','สลิปต้องไม่เกิน 4 MB');return}
   if(!selectedBank&&!activePlan){status('bad','กรุณาเลือกช่องทางการโอน');return}
-  $('verifyBtn').disabled=true;status('warn',activePlan?'กำลังตรวจสอบสลิปผ่อน (ต้องเป็นวันที่วันนี้)...':'กำลังตรวจสอบสลิปจริง...');
-  try{const fd=new FormData();fd.append('image',slipFile);if(activePlan?.plan_id){fd.append('installmentPlanId',activePlan.plan_id);fd.append('customerCode',$('customerCodeLookup').value.trim());if(selectedBank?.id)fd.append('bankAccountId',selectedBank.id);}else if(selectedProductId)fd.append('productId',selectedProductId);else if(selectedBank?.id)fd.append('bankAccountId',selectedBank.id);
-    const r=await fetch('/.netlify/functions/verify-slip',{method:'POST',body:fd});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'ตรวจสอบสลิปไม่ผ่าน');lastResult=d;if(!d.counted){status('bad',d.violationReason||'รายการนี้ไม่ถูกนับยอด');return}status('ok','ตรวจสอบและบันทึกรายการสำเร็จ ✓');showReceipt(d);await loadProducts();
-  }catch(e){status('bad',e.message)}finally{$('verifyBtn').disabled=false}};
-function showReceipt(d){$('rAmount').textContent=`${Number(d.amount||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`;const rows=[['ชื่อผู้โอน',d.payerName||'-'],['ชื่อผู้รับเงิน',d.receiverName||'-'],['ธนาคาร/ช่องทาง',d.receiverBank||'-'],['วันเวลา',d.localDateTimeLabel||d.dateTime||'-'],['เลขอ้างอิง',d.reference||'-']];if(d.plan){rows.push(['รายการผ่อน',d.plan.productName||'-']);rows.push(['ยอดคงเหลือหลังชำระ',`${Number(d.plan.after||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`]);} $('rRows').innerHTML=rows.map(([a,b])=>`<div class="receipt-row"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');$('receiptModal').classList.add('show')}
+  $('verifyBtn').disabled=true;status('warn','กำลังตรวจสอบสลิปจริง...');
+  try{
+    const fd=new FormData();fd.append('image',slipFile);
+    if(selectedProductId)fd.append('productId',selectedProductId);else if(selectedBank?.id)fd.append('bankAccountId',selectedBank.id);
+    const r=await fetch('/.netlify/functions/verify-slip',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.message||'ตรวจสอบสลิปไม่ผ่าน');lastResult=d;
+    if(!d.counted){status('bad',d.violationReason||'รายการนี้ไม่ถูกนับยอด');return}
+    status('ok','ตรวจสอบและบันทึกรายการสำเร็จ ✓');showReceipt(d);await loadProducts();
+  }catch(e){status('bad',e.message)}finally{$('verifyBtn').disabled=false}
+}
+
+async function openInstallmentConfirmation(){
+  if(!activePlan?.plan_id){status('warn','กรุณาเลือกรายการผ่อนก่อน');return;}
+  if(!slipFile){status('warn','กรุณาแนบสลิปก่อน');return;}
+  if(slipFile.size>4*1024*1024){status('bad','สลิปต้องไม่เกิน 4 MB');return;}
+  $('confirmCustomerCode').value=$('customerCodeLookup').value.trim();
+  $('confirmCodeStatus').textContent='ต้องตรงกับรหัสของรายการผ่อน';$('confirmCodeStatus').style.color='';$('installmentConfirmStatus').innerHTML='';$('confirmSendBtn').disabled=false;
+  if(installmentPreviewToken&&installmentPreviewData?.counted&&installmentPreviewData?.confirmHtml){
+    $('confirmDetails').innerHTML=installmentPreviewData.confirmHtml;$('confirmDetails').style.display='grid';
+    $('confirmDetailsHint').textContent='ตรวจสอบสลิปผ่านแล้ว ✓ ยังไม่ตัดยอด จนกว่าจะกด “✅ ส่งยอดและตัดยอดผ่อน”';
+    $('confirmSendActions').style.display='grid';$('previewInstallmentBtn').style.display='none';
+  }else{
+    installmentPreviewToken=null; installmentPreviewData=null;
+    $('confirmDetails').style.display='none';$('confirmDetails').innerHTML='';
+    $('confirmDetailsHint').textContent='เมื่อกด “ตรวจสอบและแสดงรายละเอียด” ระบบจะตรวจสลิปกับ EasySlip ก่อน โดยยังไม่ตัดยอด';
+    $('confirmSendActions').style.display='none';$('previewInstallmentBtn').style.display='block';
+  }
+  $('installmentConfirmModal').classList.add('show');
+}
+
+async function previewInstallmentPayment(){
+  const code=$('confirmCustomerCode').value.trim();
+  if(!code){$('confirmCodeStatus').textContent='กรุณากรอกรหัสลูกค้า';$('confirmCodeStatus').style.color='var(--red)';$('confirmCustomerCode').focus();return}
+  if(String(code).toLowerCase()!==String(activePlan?.customer_code||$('customerCodeLookup').value.trim()).toLowerCase()){
+    $('confirmCodeStatus').textContent='รหัสลูกค้าไม่ตรงกับรายการผ่อนนี้';$('confirmCodeStatus').style.color='var(--red)';return;
+  }
+  $('previewInstallmentBtn').disabled=true;
+  $('installmentConfirmStatus').innerHTML='<div class="status warn">กำลังตรวจสอบสลิปกับ EasySlip • ยังไม่ตัดยอด</div>';
+  try{
+    const fd=new FormData();
+    fd.append('image',slipFile);
+    fd.append('mode','preview');
+    fd.append('installmentPlanId',activePlan.plan_id);
+    fd.append('customerCode',code);
+    const r=await fetch('/.netlify/functions/verify-slip',{method:'POST',body:fd});
+    const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.message||'ตรวจสอบสลิปไม่ผ่าน');
+    if(!d.counted)throw new Error(d.violationReason||'สลิปไม่ผ่านกฎการผ่อน จึงไม่สามารถส่งยอดได้');
+    installmentPreviewToken=d.approvalToken||null;installmentPreviewData=d;
+    if(!installmentPreviewToken)throw new Error('ระบบยืนยันสลิปไม่สมบูรณ์ กรุณาลองใหม่');
+    const plan=d.plan||{};
+    const banksList=Array.isArray(plan.bankAccounts)&&plan.bankAccounts.length?plan.bankAccounts:(Array.isArray(activePlan.bank_accounts)?activePlan.bank_accounts:[]);
+    const details=[
+      ['🔖 รหัสผ่อนลูกค้า',plan.installmentCode||activePlan.installment_code||'-'],
+      ['📦 สินค้า',plan.productName||'-'],
+      ['💬 ชื่อเฟสลูกค้า',plan.customerName||activePlan.facebook_name||'-'],
+      ['📅 ระยะเวลาผ่อน',`${formatPlanDate(activePlan.start_date)} → ${formatPlanDate(activePlan.end_date)}`],
+      ['💰 ราคาเต็ม',`${money(plan.fullPrice??activePlan.agreed_price)} ฿`],
+      ['💳 ยอดจากสลิป',`${money(d.amount)} ฿`],
+      ['✅ จ่ายแล้วก่อนรายการนี้',`${money(plan.paidBefore)} ฿`],
+      ['📉 คงเหลือก่อนรายการนี้',`${money(plan.remainingBefore)} ฿`],
+      ['📉 คงเหลือหลังส่งยอด',`${money(plan.after)} ฿`],
+      ['🕒 วันเวลาในสลิป',d.localDateTimeLabel||'-'],
+      ['👤 ผู้โอน',d.payerName||'-'],
+      ['👤 ผู้รับ',d.receiverName||'-'],
+      ['💳 บัญชีที่ตรวจพบ',d.receiverAccount||'-'],
+      ['⏰ กฎเวลา',`ต้องโอนก่อน ${plan.cutoffTime||activePlan.cutoff_time||'22:00'} น. (เวลาไทย)`],
+      ['📝 หมายเหตุรายการ',plan.note||activePlan.note||'-']
+    ];
+    let html=details.map(([a,b])=>`<div class="confirm-row"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
+    if(banksList.length)html+=`<div><b>💳 ช่องทางโอนค่ายอด</b><div class="confirm-bank-list">${banksList.map((b,i)=>`<div class="confirm-bank">ช่องทาง ${i+1}: ${esc(b.bank_name||'-')} • ${esc(b.account_name||'-')} • ${esc(b.account_number||'-')}</div>`).join('')}</div></div>`;
+    installmentPreviewData.confirmHtml=html;
+    $('confirmDetails').innerHTML=html;$('confirmDetails').style.display='grid';
+    $('confirmDetailsHint').textContent='ตรวจสอบสลิปผ่านแล้ว ✓ ยังไม่ตัดยอด จนกว่าจะกด “✅ ส่งยอดและตัดยอดผ่อน”';
+    $('confirmSendActions').style.display='grid';$('previewInstallmentBtn').style.display='none';
+    $('installmentConfirmStatus').innerHTML='<div class="status ok">สลิปผ่านเงื่อนไขทั้งหมดแล้ว กรุณาตรวจสอบรายละเอียดก่อนกดส่งยอด</div>';
+  }catch(e){$('installmentConfirmStatus').innerHTML=`<div class="status bad">${esc(e.message)}</div>`}
+  finally{$('previewInstallmentBtn').disabled=false}
+}
+
+async function commitInstallmentPayment(){
+  const code=$('confirmCustomerCode').value.trim();
+  if(!installmentPreviewToken){$('installmentConfirmStatus').innerHTML='<div class="status warn">กรุณาตรวจสอบสลิปก่อน</div>';return}
+  if(!code||String(code).toLowerCase()!==String(activePlan?.customer_code||'').toLowerCase()){$('confirmCodeStatus').textContent='รหัสลูกค้าไม่ตรงกับรายการผ่อนนี้';$('confirmCodeStatus').style.color='var(--red)';return}
+  $('confirmSendBtn').disabled=true;
+  $('installmentConfirmStatus').innerHTML='<div class="status warn">กำลังบันทึกยอดและตัดยอดผ่อน...</div>';
+  try{
+    const fd=new FormData();fd.append('mode','commit');fd.append('approvalToken',installmentPreviewToken);fd.append('customerCode',code);
+    const r=await fetch('/.netlify/functions/verify-slip',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok||!d.ok)throw new Error(d.message||'ส่งยอดผ่อนไม่สำเร็จ');
+    installmentPreviewToken=null;installmentPreviewData=null;lastResult=d;
+    $('installmentConfirmModal').classList.remove('show');
+    showReceipt(d);await loadProducts();await lookupCustomerPlans();
+  }catch(e){$('installmentConfirmStatus').innerHTML=`<div class="status bad">${esc(e.message)}</div>`;}
+  finally{$('confirmSendBtn').disabled=false}
+}
+
+$('verifyBtn').onclick=async()=>{if(activePlan?.plan_id){await openInstallmentConfirmation();return;}await verifyNormalPayment()};
+$('cancelInstallmentConfirm').onclick=()=>{$('installmentConfirmModal').classList.remove('show')};
+$('cancelInstallmentConfirm2').onclick=()=>{$('installmentConfirmModal').classList.remove('show')};
+$('previewInstallmentBtn').onclick=previewInstallmentPayment;$('confirmSendBtn').onclick=commitInstallmentPayment;
+$('customerCodeLookup').addEventListener('input',()=>{activePlan=null;selectedProductId=null;selectedBank=null;installmentPreviewToken=null;installmentPreviewData=null;$('selectedPlanHint').style.display='none';$('bankSelect').disabled=false;$('verifyBtn').textContent='🔎 ตรวจสอบสลิปและส่งข้อมูล';$('slipReady').style.display='none'});
+
+function showReceipt(d){$('rAmount').textContent=`${Number(d.amount||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`;const rows=[['ชื่อผู้โอน',d.payerName||'-'],['ชื่อผู้รับเงิน',d.receiverName||'-'],['ธนาคาร/ช่องทาง',d.receiverBank||'-'],['วันเวลา',d.localDateTimeLabel||d.dateTime||'-'],['เลขอ้างอิง',d.reference||'-']];if(d.plan){rows.push(['รายการผ่อน',d.plan.productName||'-']);rows.push(['ยอดคงเหลือหลังชำระ',`${Number(d.plan.after||0).toLocaleString('th-TH',{minimumFractionDigits:2})} บาท`]);} $('rRows').innerHTML=rows.map(([a,b])=>`<div class="receipt-row"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');$('saveSlip').style.display=d.plan?'none':'block';$('receiptModal').classList.add('show')}
 $('saveSlip').onclick=()=>{if(!slipFile)return;const u=URL.createObjectURL(slipFile);const a=document.createElement('a');a.href=u;a.download=`rose-account-slip-${Date.now()}.${(slipFile.name.split('.').pop()||'jpg')}`;a.click();URL.revokeObjectURL(u)};
 $('saveReceipt').onclick=async()=>{const card=$('receiptCard');try{if(!window.html2canvas)throw new Error('ยังโหลดระบบบันทึกใบเสร็จไม่สำเร็จ');const c=await html2canvas(card,{backgroundColor:'#fffdfd',scale:2,useCORS:true});const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=`rose-account-receipt-${Date.now()}.png`;a.click()}catch(e){alert(e.message)}};
 let frontProducts=[];let frontProductFilter='installment';let customerLookupPlans=[];
@@ -108,21 +281,27 @@ function planPeriodLabel(plan){if(!plan)return 'ยังไม่ได้ก�
 function frontProductImage(p){if(!p.product_image_url)return '<div class="product-img" style="width:100%;aspect-ratio:4/3;border-radius:14px;display:grid;place-items:center;font-size:44px">📦</div>';const img=`<img src="${esc(p.product_image_url)}" alt="${esc(p.product_name)}">`;return p.image_link_url?`<a class="image-link" href="${esc(p.image_link_url)}" target="_blank" rel="noopener noreferrer">${img}</a>`:img;}
 function frontCodeImage(p){if(!p.code_image_url)return '';const img=`<img class="code-image" src="${esc(p.code_image_url)}" alt="รูปรหัส ${esc(p.product_name)}">`;return p.code_image_link_url?`<a class="image-link" href="${esc(p.code_image_link_url)}" target="_blank" rel="noopener noreferrer">${img}</a>`:img;}
 function planBanks(p){const out=[];for(const b of (p?.plan?.bank_accounts||[])){if(b?.id&&!out.some(x=>x.id===b.id))out.push(b)}if(!out.length&&p?.bank_account?.id)out.push(p.bank_account);return out;}
-function renderFrontProducts(){renderFrontProductCounts();const list=frontProducts.filter(p=>frontStatus(p)===frontProductFilter);const box=$('productsBox');if(!list.length){box.innerHTML='<div class="status warn" style="grid-column:1/-1">ยังไม่มีสินค้าในหมวดนี้ หรือสินค้ายังไม่ได้เปิดแสดงบนหน้าเว็บ</div>';return;}box.innerHTML=list.map(p=>{const st=frontStatus(p);const label=st==='sold'?'ขายแล้ว':st==='installment'?'ติดผ่อน':'จำหน่าย';const plan=p.plan||null;const remaining=plan?Number(plan.remaining??0):null;const paid=plan?Number(plan.paid??Math.max(Number(p.full_price||0)-Number(remaining||0),0)):null;const planCode=plan?.installment_code||`RP-${String(plan?.id||p.id).slice(0,8).toUpperCase()}`;const banks2=planBanks(p);const period=plan?planPeriodLabel(plan):'';const canSelect=st==='installment'&&plan?.id;return `<article class="product-card" data-product-id="${esc(p.id)}">${frontProductImage(p)}<div class="product-title">${esc(p.product_name)}</div>${p.sku?`<div class="muted">SKU: ${esc(p.sku)}</div>`:''}<div class="product-meta"><div class="mini"><span>ราคา</span><b>${money(p.full_price)} ฿</b></div><div class="mini"><span>สถานะ</span><b>${label}</b></div></div>${st==='installment'&&plan?`<div class="amount-trio"><div class="mini"><span>ราคา</span><b>${money(p.full_price)} ฿</b></div><div class="mini"><span>จ่ายแล้ว</span><b>${money(paid)} ฿</b></div><div class="mini"><span>คงเหลือ</span><b>${money(remaining)} ฿</b></div></div><div class="product-detail"><div class="product-detail-title">🧾 ข้อมูลรายการผ่อน</div><div class="detail-list"><div>🔖 <b>รหัสผ่อนลูกค้า:</b> ${esc(planCode)}</div>${plan.customer_code?`<div>👤 <b>รหัสลูกค้า:</b> ${esc(plan.customer_code)}</div>`:''}<div>📅 <b>ระยะเวลาผ่อน:</b> ${esc(period)}</div>${plan.facebook_name?`<div>💬 <b>ชื่อเฟสลูกค้าที่ผ่อน:</b> ${esc(plan.facebook_name)}</div>`:''}${banks2.length?`<div>💳 <b>ช่องทางโอนค่ายอด:</b> ${banks2.map((b,i)=>`${i+1}) ${esc(b.bank_name||'-')} • ${esc(b.account_name||'-')} • ${esc(b.account_number||'-')}`).join(' • ')}</div>`:''}<div>⏰ <b>กฎเวลา:</b> ต้องโอนก่อน ${esc(plan.cutoff_time||'22:00')} น. (เวลาไทย)</div><div>👤 <b>ชื่อผู้รับ:</b> พัชชลัยย์ / Phatchalai</div><div>📎 <b>แนบสลิป:</b> JPG, PNG, GIF, WebP ไม่เกิน 4 MB • สลิปซ้ำไม่นับ • โอนผิดบัญชีไม่นับ</div></div>${p.terms?`<div class="terms"><b>📜 กฎผ่อนสินค้า</b><br>${esc(p.terms).replace(/\n/g,'<br>')}</div>`:''}${plan.note?`<div class="product-note"><b>📝 หมายเหตุรายการ</b><br>${esc(plan.note).replace(/\n/g,'<br>')}</div>`:''}<div class="plan-period">📅 ${esc(period||'ยังไม่ได้กำหนดช่วงเวลา')}</div>${plan.status==='paid'&&plan.unlock_code?`<div class="code-unlock">🔓 ชำระครบแล้ว • รหัสปลดล็อก: ${esc(plan.unlock_code)}</div>`:''}${frontCodeImage(p)}</div>`:''}${st==='sold'&&plan?.status==='paid'&&plan?.unlock_code?`<div class="code-unlock">🔓 ผ่อนครบแล้ว • รหัส: ${esc(plan.unlock_code)}</div>`:''}${st==='sold'?'<button class="btn-soft" type="button" disabled>ขายแล้ว</button>':canSelect?`<button class="btn-soft" type="button" onclick='selectInstallmentProduct(${JSON.stringify(p).replace(/</g,'\u003c')})'>📎 แนบสลิปผ่อน</button>`:'<button class="btn-soft" type="button" disabled>ยังไม่เปิดผ่อน</button>'}</article>`}).join('');}
+function renderFrontProducts(){
+  renderFrontProductCounts();
+  const list=frontProducts.filter(p=>frontStatus(p)===frontProductFilter);
+  const box=$('productsBox');
+  if(!list.length){box.innerHTML='<div class="status warn" style="grid-column:1/-1">ยังไม่มีสินค้าในหมวดนี้ หรือสินค้ายังไม่ได้เปิดแสดงบนหน้าเว็บ</div>';return;}
+  box.innerHTML=list.map(p=>{
+    const st=frontStatus(p);const label=st==='sold'?'ขายแล้ว':st==='installment'?'ติดผ่อน':'จำหน่าย';const plan=p.plan||null;const planCode=plan?.installment_code||`RP-${String(plan?.id||p.id).slice(0,8).toUpperCase()}`;const banks2=planBanks(p);const period=plan?planPeriodLabel(plan):'';const canSelect=st==='installment'&&plan?.id;
+    return `<article class="product-card" data-product-id="${esc(p.id)}">${frontProductImage(p)}<div class="product-title">${esc(p.product_name)}</div><div class="product-meta"><div class="mini"><span>ราคา</span><b>${money(p.full_price)} ฿</b></div><div class="mini"><span>สถานะ</span><b>${label}</b></div></div>
+    ${st==='installment'&&plan?`<div class="product-detail"><div class="product-detail-title">🧾 ข้อมูลรายการผ่อน</div><div class="detail-list"><div>🔖 <b>รหัสผ่อนลูกค้า:</b> ${esc(planCode)}</div><div>📅 <b>ระยะเวลาผ่อน:</b> ${esc(period)}</div>${plan.facebook_name?`<div>💬 <b>ชื่อเฟสลูกค้าที่ผ่อน:</b> ${esc(plan.facebook_name)}</div>`:''}${banks2.length?`<div>💳 <b>ช่องทางโอนค่ายอด:</b> ${banks2.map((b,i)=>`${i+1}) ${esc(b.bank_name||'-')} • ${esc(b.account_name||'-')} • ${esc(b.account_number||'-')}`).join(' • ')}</div>`:''}<div>⏰ <b>กฎเวลา:</b> ต้องโอนก่อน ${esc(plan.cutoff_time||'22:00')} น. (เวลาไทย)</div><div>👤 <b>ชื่อผู้รับ:</b> พัชชลัยย์ / Phatchalai</div><div>📎 <b>แนบสลิป:</b> JPG, PNG, GIF, WebP ไม่เกิน 4 MB • สลิปซ้ำไม่นับ • โอนผิดบัญชีไม่นับ</div></div>${p.terms?`<div class="terms"><b>📜 กฎผ่อนสินค้า</b><br>${esc(p.terms).replace(/\n/g,'<br>')}</div>`:''}${plan.note?`<div class="product-note"><b>📝 หมายเหตุรายการ</b><br>${esc(plan.note).replace(/\n/g,'<br>')}</div>`:''}<div class="plan-period">📅 ${esc(period||'ยังไม่ได้กำหนดช่วงเวลา')}</div>${plan.status==='paid'&&plan.unlock_code?`<div class="code-unlock">🔓 ชำระครบแล้ว • รหัสปลดล็อก: ${esc(plan.unlock_code)}</div>`:''}${frontCodeImage(p)}</div>`:''}
+    ${st==='sold'?'<button class="btn-soft" type="button" disabled>ขายแล้ว</button>':canSelect?`<button class="btn-soft" type="button" onclick='selectInstallmentProduct(${JSON.stringify(p).replace(/</g,'\\u003c')})'>📎 แนบสลิปผ่อน</button>`:'<button class="btn-soft" type="button" disabled>ยังไม่เปิดผ่อน</button>'}</article>`;
+  }).join('');
+}
 async function loadProducts(){const box=$('productsBox');box.innerHTML='<div class="status warn" style="grid-column:1/-1">กำลังโหลดรายการ...</div>';try{const r=await fetch('/.netlify/functions/installment-products',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'โหลดรายการไม่สำเร็จ');frontProducts=Array.isArray(d.products)?d.products:[];renderFrontProducts();}catch(e){box.innerHTML=`<div class="status bad" style="grid-column:1/-1">${esc(e.message)}</div>`}}
 document.querySelectorAll('.product-filter-tab').forEach(b=>b.addEventListener('click',()=>{frontProductFilter=b.dataset.filter;renderFrontProducts()}));
-function selectInstallmentProduct(p){
+async function selectInstallmentProduct(p){
   if(frontStatus(p)!=='installment'||!p.plan?.id){status('warn','รายการนี้ยังไม่มีรายการผ่อนในระบบ');return;}
   const entered=$('customerCodeLookup').value.trim();
   if(!entered){$('selectedPlanHint').style.display='block';$('selectedPlanHint').className='status warn';$('selectedPlanHint').textContent='🔐 กรุณากรอกรหัสลูกค้าก่อนแนบสลิป';$('customerCodeLookup').focus();$('customerCodeLookup').scrollIntoView({behavior:'smooth',block:'center'});return;}
-  const matched=customerLookupPlans.find(pl=>String(pl.product_id)===String(p.id)&&pl.status==='active' && String(pl.customer_code||'').toLowerCase()===String(entered).toLowerCase());
-  if(!matched){
-    $('selectedPlanHint').style.display='block';
-    $('selectedPlanHint').className='status warn';
-    $('selectedPlanHint').textContent='กรุณากด “ดูรายการผ่อน” หลังกรอกรหัสลูกค้าก่อน แล้วกด “แนบสลิปผ่อน” อีกครั้ง';
-    $('lookupCustomerBtn').focus();
-    return;
-  }
+  let matched=customerLookupPlans.find(pl=>String(pl.product_id)===String(p.id)&&pl.status==='active'&&String(pl.customer_code||'').toLowerCase()===String(entered).toLowerCase());
+  if(!matched){await lookupCustomerPlans();matched=customerLookupPlans.find(pl=>String(pl.product_id)===String(p.id)&&pl.status==='active'&&String(pl.customer_code||'').toLowerCase()===String(entered).toLowerCase());}
+  if(!matched){$('selectedPlanHint').style.display='block';$('selectedPlanHint').className='status warn';$('selectedPlanHint').textContent='ไม่พบรายการผ่อนของสินค้านี้สำหรับรหัสลูกค้าที่กรอก';$('customerCodeLookup').focus();return;}
   selectCustomerPlan(matched);
   $('slipFile').value='';
   $('slipFile').click();
@@ -131,13 +310,41 @@ function setInstallmentBanks(p){const list=planBanks(p);const sel=$('bankSelect'
 function selectCustomerPlan(plan){
   const entered=$('customerCodeLookup').value.trim();
   if(!entered||String(entered).toLowerCase()!==String(plan.customer_code||'').toLowerCase()){status('bad','กรุณาใช้รหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด');$('customerCodeLookup').focus();return;}
+  const merged={...plan,plan_id:plan.plan_id||plan.id,bank_accounts:plan.bank_accounts||[]};
   const p=frontProducts.find(x=>x.id===plan.product_id);
-  if(p){p.plan={...(p.plan||{}),...plan,id:plan.plan_id,status:plan.status,customer_code:plan.customer_code,installment_code:plan.installment_code,bank_accounts:plan.bank_accounts||[]};selectedProductId=p.id;activePlan={plan_id:plan.plan_id,customer_code:plan.customer_code};setInstallmentBanks(p);$('selectedPlanHint').style.display='block';$('selectedPlanHint').className='status warn';$('selectedPlanHint').textContent=`เลือก “${plan.product_name}” แล้ว • รหัสลูกค้าถูกยืนยัน ✓ • สลิปผ่อนต้องเป็นวันปัจจุบันเท่านั้น`;document.querySelector(`[data-product-id="${CSS.escape(String(p.id))}"]`)?.classList.add('selected-product');$('verifyBtn').scrollIntoView({behavior:'smooth',block:'center'});return;}
-  const pseudo={id:plan.product_id,product_name:plan.product_name,full_price:plan.agreed_price,assigned_customer_id:true,plan:{...plan,id:plan.plan_id}};selectedProductId=pseudo.id;activePlan={plan_id:plan.plan_id,customer_code:plan.customer_code};setInstallmentBanks(pseudo);$('selectedPlanHint').style.display='block';$('selectedPlanHint').className='status warn';$('selectedPlanHint').textContent=`เลือก “${plan.product_name}” แล้ว • รหัสลูกค้าถูกยืนยัน ✓ • สลิปผ่อนต้องเป็นวันปัจจุบันเท่านั้น`;$('verifyBtn').scrollIntoView({behavior:'smooth',block:'center'});
+  if(p){p.plan={...(p.plan||{}),...merged,id:merged.plan_id,status:merged.status,customer_code:merged.customer_code,installment_code:merged.installment_code,bank_accounts:merged.bank_accounts||[]};selectedProductId=p.id;activePlan={...merged,plan_id:merged.plan_id,customer_code:merged.customer_code};setInstallmentBanks(p);} 
+  else {const pseudo={id:plan.product_id,product_name:plan.product_name,full_price:plan.agreed_price,assigned_customer_id:true,plan:{...merged,id:merged.plan_id}};selectedProductId=pseudo.id;activePlan={...merged,plan_id:merged.plan_id,customer_code:merged.customer_code};setInstallmentBanks(pseudo);}
+  $('verifyBtn').textContent='💸 ส่งยอดผ่อน';$('selectedPlanHint').style.display='block';$('selectedPlanHint').className='status warn';$('selectedPlanHint').textContent=`เลือก “${plan.product_name}” แล้ว • รหัสลูกค้าถูกยืนยัน ✓ • แนบสลิปได้ทันที`;
+  document.querySelector(`[data-product-id="${CSS.escape(String(plan.product_id))}"]`)?.classList.add('selected-product');$('verifyBtn').scrollIntoView({behavior:'smooth',block:'center'});
 }
-async function lookupCustomerPlans(){const code=$('customerCodeLookup').value.trim();activePlan=null;selectedProductId=null;selectedBank=null;if(!code){$('customerLookupStatus').innerHTML='<div class="status warn">กรุณาใส่รหัสลูกค้า</div>';return;}$('customerLookupStatus').innerHTML='<div class="status warn">กำลังค้นหารายการผ่อน...</div>';try{const r=await fetch(`/.netlify/functions/customer-installments?code=${encodeURIComponent(code)}`,{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'ค้นหารายการไม่สำเร็จ');customerLookupPlans=Array.isArray(d.plans)?d.plans:[];if(!customerLookupPlans.length){$('customerPlansBox').innerHTML='';$('customerLookupStatus').innerHTML='<div class="status warn">ไม่พบรายการผ่อนของรหัสลูกค้านี้</div>';return;}$('customerLookupStatus').innerHTML=`<div class="status ok">พบ ${customerLookupPlans.length} รายการ • ชื่อเฟส: ${esc(d.customer||'-')}</div>`;$('customerPlansBox').innerHTML=customerLookupPlans.map(pl=>{const paid=Math.max(Number(pl.agreed_price||0)-Number(pl.remaining_amount||0),0);
-const planPeriod=planPeriodLabel(pl);const banks=Array.isArray(pl.bank_accounts)?pl.bank_accounts:[];const img=pl.product_image_url?(pl.product_image_link_url?`<a class="image-link" href="${esc(pl.product_image_link_url)}" target="_blank" rel="noopener noreferrer"><img class="customer-plan-image" src="${esc(pl.product_image_url)}" alt=""></a>`:`<img class="customer-plan-image" src="${esc(pl.product_image_url)}" alt="">`):'<div class="customer-plan-image" style="display:grid;place-items:center;font-size:30px">📦</div>';return `<div class="plan ${pl.status==='active'?'active':''}"><div class="plan-head">${img}<div style="flex:1"><b>${esc(pl.product_name)}</b><div class="muted">รหัสผ่อน: ${esc(pl.installment_code||'—')}</div><div class="muted">ระยะเวลา: ${esc(planPeriod)}</div></div></div><div class="mini-grid"><div class="mini"><span>ราคา</span><b>${money(pl.agreed_price)} ฿</b></div><div class="mini"><span>จ่ายแล้ว</span><b>${money(paid)} ฿</b></div><div class="mini"><span>คงเหลือ</span><b>${money(pl.remaining_amount)} ฿</b></div></div>${pl.note?`<div class="product-note"><b>📝 หมายเหตุรายการ</b><br>${esc(pl.note).replace(/\n/g,'<br>')}</div>`:''}<div class="plan-period">📅 ${esc(planPeriod)}</div>${banks.length?`<div class="channel-buttons" style="grid-template-columns:1fr">${banks.map((b,i)=>`<div class="channel-btn" style="cursor:default">💳 ช่องทาง ${i+1}: ${esc(b.bank_name)} • ${esc(b.account_name||'-')} • ${esc(b.account_number)}</div>`).join('')}</div>`:''}<label class="btn-soft slip-direct-label" for="slipFile" style="margin-top:9px" onclick='selectCustomerPlan(${JSON.stringify(pl).replace(/</g,'\u003c')})'>📎 แนบสลิปเลย</label></div>`}).join('');}catch(e){$('customerLookupStatus').innerHTML=`<div class="status bad">${esc(e.message)}</div>`;}}
-$('lookupCustomerBtn').onclick=lookupCustomerPlans;$('customerCodeLookup').addEventListener('input',()=>{activePlan=null;selectedProductId=null;selectedBank=null;$('selectedPlanHint').style.display='none';$('bankSelect').disabled=false;});$('customerCodeLookup').addEventListener('keydown',e=>{if(e.key==='Enter')lookupCustomerPlans()});
+async function lookupCustomerPlans(){
+  const code=$('customerCodeLookup').value.trim();activePlan=null;selectedProductId=null;selectedBank=null;installmentPreviewToken=null;installmentPreviewData=null;
+  $('verifyBtn').textContent='🔎 ตรวจสอบสลิปและส่งข้อมูล';$('slipReady').style.display='none';
+  if(!code){$('customerLookupStatus').innerHTML='<div class="status warn">กรุณาใส่รหัสลูกค้า</div>';return;}
+  $('customerLookupStatus').innerHTML='<div class="status warn">กำลังค้นหารายการผ่อน...</div>';
+  try{
+    const r=await fetch(`/.netlify/functions/customer-installments?code=${encodeURIComponent(code)}`,{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'ค้นหารายการไม่สำเร็จ');
+    customerLookupPlans=Array.isArray(d.plans)?d.plans:[];
+    if(!customerLookupPlans.length){$('customerPlansBox').innerHTML='';$('customerLookupStatus').innerHTML='<div class="status warn">ไม่พบรายการผ่อนของรหัสลูกค้านี้</div>';return;}
+    $('customerLookupStatus').innerHTML=`<div class="status ok">พบ ${customerLookupPlans.length} รายการ • ชื่อเฟส: ${esc(d.customer||'-')}</div>`;
+    $('customerPlansBox').innerHTML=customerLookupPlans.map(pl=>{
+      const paid=Math.max(Number(pl.agreed_price||0)-Number(pl.remaining_amount||0),0);const planPeriod=planPeriodLabel(pl);const banks=Array.isArray(pl.bank_accounts)?pl.bank_accounts:[];
+      const img=pl.product_image_url?(pl.product_image_link_url?`<a class="image-link" href="${esc(pl.product_image_link_url)}" target="_blank" rel="noopener noreferrer"><img class="customer-plan-image" src="${esc(pl.product_image_url)}" alt=""></a>`:`<img class="customer-plan-image" src="${esc(pl.product_image_url)}" alt="">`):'<div class="customer-plan-image" style="display:grid;place-items:center;font-size:30px">📦</div>';
+      const history=Array.isArray(pl.payment_history)?pl.payment_history:[];
+      const historyRows=history.length?history.map(h=>`<tr><td>${esc(h.paid_at?formatDateTime(h.paid_at):'-')}</td><td>${money(h.amount)} ฿</td><td>${money(h.after_paid_total)} ฿</td><td>${money(h.remaining_after)} ฿</td><td>${esc(h.reference||'-')}</td></tr>`).join(''):'<tr><td colspan="5">ยังไม่มีประวัติการส่งยอด</td></tr>';
+      return `<div class="plan ${pl.status==='active'?'active':''}"><div class="plan-head">${img}<div style="flex:1"><b>${esc(pl.product_name)}</b><div class="muted">รหัสผ่อน: ${esc(pl.installment_code||'—')}</div><div class="muted">ระยะเวลา: ${esc(planPeriod)}</div></div></div><div class="mini-grid"><div class="mini"><span>ราคา</span><b>${money(pl.agreed_price)} ฿</b></div><div class="mini"><span>จ่ายแล้ว</span><b>${money(paid)} ฿</b></div><div class="mini"><span>คงเหลือ</span><b>${money(pl.remaining_amount)} ฿</b></div></div>${pl.note?`<div class="product-note"><b>📝 หมายเหตุรายการ</b><br>${esc(pl.note).replace(/\n/g,'<br>')}</div>`:''}<div class="plan-period">📅 ${esc(planPeriod)}</div>${banks.length?`<div class="channel-buttons">${banks.map((b,i)=>`<div class="channel-btn" style="cursor:default">💳 ช่องทาง ${i+1}: ${esc(b.bank_name)} • ${esc(b.account_name||'-')} • ${esc(b.account_number)}</div>`).join('')}</div>`:''}
+      <div style="margin-top:12px;font-weight:900">📋 ตารางการส่งยอดผ่อน</div><div class="history-wrap"><table class="history-table"><thead><tr><th>วันที่/เวลา</th><th>ยอด</th><th>จ่ายสะสม</th><th>คงเหลือ</th><th>เลขอ้างอิง</th></tr></thead><tbody>${historyRows}</tbody></table></div>
+      <div class="history-total"><div class="mini"><span>ยอดผ่อนสะสม</span><b>${money(paid)} ฿</b></div><div class="mini"><span>คงเหลือ</span><b>${money(pl.remaining_amount)} ฿</b></div><div class="mini"><span>สถานะ</span><b>${pl.status==='paid'?'ผ่อนครบแล้ว':'กำลังผ่อน'}</b></div></div>
+      <div class="plan-actions"><button class="btn-soft" type="button" onclick='selectCustomerPlan(${JSON.stringify(pl).replace(/</g,'\\u003c')});$("slipFile").value="";$("slipFile").click();'>📎 แนบสลิปเลย</button><button class="btn-soft" type="button" onclick='openHistoryReceiptById(${JSON.stringify(pl).replace(/</g,'\\u003c')})'>💾 บันทึกใบเสร็จการผ่อน</button></div></div>`;
+    }).join('');
+  }catch(e){$('customerLookupStatus').innerHTML=`<div class="status bad">${esc(e.message)}</div>`;}
+}
+$('lookupCustomerBtn').onclick=lookupCustomerPlans;$('customerCodeLookup').addEventListener('keydown',e=>{if(e.key==='Enter')lookupCustomerPlans()});
+function formatDateTime(v){if(!v)return '-';const d=new Date(v);if(Number.isNaN(d.getTime()))return String(v);return d.toLocaleString('th-TH',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});}
+let historyReceiptPlan=null;
+function openHistoryReceiptById(plan){historyReceiptPlan=plan;const hist=Array.isArray(plan.payment_history)?plan.payment_history:[];const paid=Math.max(Number(plan.agreed_price||0)-Number(plan.remaining_amount||0),0);$('historyReceiptSummary').innerHTML=`<div class="receipt-amount"><span>${esc(plan.product_name||'-')}</span><strong>${money(paid)} บาท</strong></div><div class="receipt-row"><span>รหัสลูกค้า</span><b>${esc(plan.customer_code||'-')}</b></div><div class="receipt-row"><span>ชื่อเฟส</span><b>${esc(plan.customer_name||'-')}</b></div><div class="receipt-row"><span>ระยะเวลาผ่อน</span><b>${esc(planPeriodLabel(plan))}</b></div><div class="receipt-row"><span>ราคาเต็ม</span><b>${money(plan.agreed_price)} บาท</b></div><div class="receipt-row"><span>คงเหลือ</span><b>${money(plan.remaining_amount)} บาท</b></div>`;$('historyReceiptRows').innerHTML=`<table class="receipt-history-table"><thead><tr><th>วันที่</th><th>ยอด</th><th>จ่ายสะสม</th><th>คงเหลือ</th></tr></thead><tbody>${hist.length?hist.map(h=>`<tr><td>${esc(formatDateTime(h.paid_at))}</td><td>${money(h.amount)} ฿</td><td>${money(h.after_paid_total)} ฿</td><td>${money(h.remaining_after)} ฿</td></tr>`).join(''):'<tr><td colspan="4">ยังไม่มีรายการชำระ</td></tr>'}</tbody></table>`;$('historyReceiptModal').classList.add('show');}
+$('closeHistoryReceipt').onclick=()=>$('historyReceiptModal').classList.remove('show');
+$('saveHistoryReceipt').onclick=async()=>{const card=$('historyReceiptCard');try{if(!window.html2canvas)throw new Error('ยังโหลดระบบบันทึกใบเสร็จไม่สำเร็จ');const c=await html2canvas(card,{backgroundColor:'#fffdfd',scale:2,useCORS:true});const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download=`rose-installment-receipt-${historyReceiptPlan?.installment_code||Date.now()}.png`;a.click()}catch(e){alert(e.message)}};
 function setupMotion(){const root=$('floatingEmojis');if(!root)return;const type=settings.motion?.background||'float';const sets={float:['🌸','🌷','🌹','🫧','✨'],gradient:['💗','💜','💙','💛','✨'],bubbles:['🫧','🫧','💧','○','◦'],hearts:['💗','💖','💕','💞','💓'],stars:['✨','⭐','🌟','💫']};const emojis=sets[type]||sets.float;root.innerHTML='';if(type==='none')return;for(let i=0;i<18;i++){const s=document.createElement('span');s.className='floating-emoji';s.textContent=emojis[i%emojis.length];s.style.left=(3+Math.random()*94)+'%';s.style.setProperty('--dur',(8+Math.random()*7)+'s');s.style.setProperty('--delay',(-Math.random()*12)+'s');s.style.setProperty('--drift',((Math.random()*2-1)*30)+'px');root.appendChild(s);}applyMotionSpeed(settings.motion?.speed||'normal');}
 function applyMotionSpeed(speed){const map={slow:1.35,normal:1,fast:.72};document.documentElement.style.setProperty('--motion-factor',String(map[speed]||1));document.querySelectorAll('.floating-emoji').forEach((el,i)=>{const base=parseFloat(el.style.getPropertyValue('--dur'))||10;el.style.animationDuration=(base*(map[speed]||1))+'s';});}
 function clickEffectFor(){const t=settings.motion?.click_effect_type||'sparkle';const sets={sparkle:['✨','✦','✧'],heart:['💗','💖','💕'],star:['⭐','🌟','✨'],flower:['🌸','🌷','🌹']};return sets[t]||[];}

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const MAX = 4 * 1024 * 1024;
 const ALLOWED = new Set(['image/jpeg','image/png','image/gif','image/webp']);
 
@@ -161,10 +162,53 @@ async function getJson(resp) {
   return { data, text };
 }
 
+function tokenSecret() {
+  return process.env.INSTALLMENT_TOKEN_SECRET || process.env.EASYSLIP_API_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '';
+}
+function base64url(v){return Buffer.from(v).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function fromBase64url(v){let s=String(v||'').replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return Buffer.from(s,'base64').toString('utf8');}
+function signToken(payload){const secret=tokenSecret();if(!secret)throw new Error('ยังไม่ได้ตั้งค่า secret สำหรับยืนยันรายการผ่อนใน Netlify');const body=base64url(JSON.stringify(payload));const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');return `${body}.${sig}`;}
+function verifyToken(token){const secret=tokenSecret();if(!secret)throw new Error('ยังไม่ได้ตั้งค่า secret สำหรับยืนยันรายการผ่อนใน Netlify');const parts=String(token||'').split('.');if(parts.length!==2)throw new Error('รหัสยืนยันรายการผ่อนไม่ถูกต้อง');const expected=crypto.createHmac('sha256',secret).update(parts[0]).digest('base64url');const a=Buffer.from(expected),b=Buffer.from(parts[1]);if(a.length!==b.length||!crypto.timingSafeEqual(a,b))throw new Error('รหัสยืนยันรายการผ่อนหมดอายุหรือไม่ถูกต้อง');const payload=JSON.parse(fromBase64url(parts[0]));if(!payload.exp||Date.now()>Number(payload.exp))throw new Error('การยืนยันสลิปหมดอายุ กรุณาแนบสลิปและตรวจสอบใหม่');return payload;}
+
+async function commitApprovalToken(token, submittedCustomerCode){
+  const t=verifyToken(token);
+  if(String(submittedCustomerCode||'').trim().toLowerCase()!==String(t.customerCode||'').trim().toLowerCase()) throw new Error('รหัสลูกค้าไม่ตรงกับรายการผ่อนนี้');
+  const pResp=await supaFetch(`/rest/v1/installment_plans?select=id,installment_code,customer_id,product_id,agreed_price,paid_amount,manual_remaining_amount,status,violation_count,cutoff_time,start_date,end_date,required_bank_account_id,required_bank_account_id_2,note,customers(id,customer_code,facebook_name,is_active),installment_products(product_name)&id=eq.${encodeURIComponent(t.planId)}&limit=1`);
+  const pJson=await getJson(pResp);
+  if(!pResp.ok||!Array.isArray(pJson.data)||!pJson.data[0]) throw new Error('ไม่พบรายการผ่อนที่ยืนยันไว้');
+  const current=pJson.data[0];
+  if(current.status!=='active') throw new Error(current.status==='paid'?'รายการนี้ผ่อนครบแล้ว':'รายการผ่อนนี้ไม่สามารถส่งยอดได้');
+  if(!current.customers?.is_active) throw new Error('ลูกค้ารายนี้ถูกปิดใช้งาน');
+  if(String(current.customers.customer_code||'').toLowerCase()!==String(t.customerCode||'').toLowerCase()) throw new Error('รหัสลูกค้าไม่ตรงกับรายการผ่อนนี้');
+  const currentRemaining=Math.max(Number(current.manual_remaining_amount??(Number(current.agreed_price||0)-Number(current.paid_amount||0))),0);
+  if(Math.abs(currentRemaining-Number(t.remainingBefore||0))>0.005) throw new Error('ยอดคงเหลือของรายการนี้เปลี่ยนไปแล้ว กรุณาแนบสลิปและตรวจสอบใหม่');
+  const resp=await supaFetch('/rest/v1/rpc/process_verified_payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    p_payer_name:t.payerName||null,p_receiver_name:t.receiverName||null,p_receiver_bank:t.receiverBank||null,p_amount:Number(t.amount||0),p_date_time:t.dateTime||null,p_reference:t.reference||null,p_status:'verified',p_easyslip_response:t.easyslipResponse||{},p_bank_account_id:t.bankAccountId||null,p_month_start:monthStartBangkok(t.dateTime),p_customer_id:t.customerId||current.customer_id||null,p_installment_plan_id:t.planId,p_rule_status:'counted',p_violation_reason:null
+  })});
+  const j=await getJson(resp);
+  if(!resp.ok){if(String(j.text||'').includes('DUPLICATE_REFERENCE')||resp.status===409)throw new Error('สลิปนี้ถูกใช้ไปแล้ว ไม่สามารถนับยอดซ้ำได้');throw new Error(`บันทึกรายการลง Supabase ไม่สำเร็จ: ${j.text||resp.statusText}`);}
+  const saved=Array.isArray(j.data)?j.data[0]:j.data;
+  const after=Math.max(currentRemaining-Number(t.amount||0),0);
+  const planStatus=after<=0?'paid':'active';
+  return {ok:true,counted:true,ruleStatus:'counted',violationReason:null,amount:Number(t.amount||0),dateTime:t.dateTime||null,localDateTimeLabel:t.localDateTimeLabel||null,reference:t.reference||null,payerName:t.payerName||null,receiverName:t.receiverName||null,receiverBank:t.receiverBank||null,receiverAccount:t.receiverAccount||null,isDuplicate:false,plan:{id:t.planId,installmentCode:t.installmentCode,customerCode:t.customerCode,customerName:t.customerName||current.customers?.facebook_name||null,productName:t.productName||current.installment_products?.product_name||'-',before:currentRemaining,after,status:planStatus},saved};
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { ok:false, message:'Method Not Allowed' });
   try {
     const { file, fields } = await parseMultipart(event);
+    const mode=clean(fields.mode)||'commit';
+    const approvalToken=clean(fields.approvalToken);
+    if(mode==='commit' && approvalToken){
+      try {
+        const result=await commitApprovalToken(approvalToken,clean(fields.customerCode));
+        return json(200,result);
+      } catch(e) {
+        const msg=e.message||'ไม่สามารถส่งยอดผ่อนได้';
+        const code=msg.includes('DUPLICATE')?'DUPLICATE_SLIP':msg.includes('หมดอายุ')?'APPROVAL_EXPIRED':'INSTALLMENT_COMMIT_FAILED';
+        return json(code==='DUPLICATE_SLIP'?409:400,{ok:false,code,message:msg});
+      }
+    }
     if (!file) return json(400, { ok:false, message:'ไม่พบไฟล์สลิป' });
     if (file.size > MAX) return json(400, { ok:false, message:'ไฟล์สลิปต้องมีขนาดไม่เกิน 4 MB' });
     if (!ALLOWED.has(file.mimeType)) return json(400, { ok:false, message:'รองรับเฉพาะ JPG, PNG, GIF และ WebP' });
@@ -173,6 +217,7 @@ exports.handler = async (event) => {
     const submittedCustomerCode = clean(fields.customerCode);
     let installmentPlanId = clean(fields.installmentPlanId);
     const productId = clean(fields.productId);
+    const isPreview = mode==='preview' && !!installmentPlanId;
 
     let selectedAccount = null;
     let allowedInstallmentAccounts = [];
@@ -265,10 +310,7 @@ exports.handler = async (event) => {
       selectedAccount = allowedInstallmentAccounts.find(a => matchesAccountNumber(a.account_number)) || null;
       if (selectedAccount) receiverBank = receiver.bank || selectedAccount.bank_name || null;
       if (!selectedAccount) {
-        await supaFetch('/rest/v1/rpc/process_verified_payment', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({p_payer_name:payerName||null,p_receiver_name:receiverName||null,p_receiver_bank:receiverBank,p_amount:amount==null?null:Number(amount),p_date_time:transferDateTime||null,p_reference:reference||null,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน'})
-        }).catch(()=>{});
+        if(!isPreview){await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({p_payer_name:payerName||null,p_receiver_name:receiverName||null,p_receiver_bank:receiverBank,p_amount:amount==null?null:Number(amount),p_date_time:transferDateTime||null,p_reference:reference||null,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน'}),}).catch(()=>{});}
         return json(400,{ok:false,code:'RECEIVER_ACCOUNT_MISMATCH',message:'สลิปนี้โอนเข้าบัญชีไม่ตรงกับช่องทางรับเงินที่กำหนดของรายการผ่อน จึงไม่นับยอด'});
       }
     }
@@ -311,11 +353,8 @@ exports.handler = async (event) => {
     }
 
     if (!receiverNameAllowed(receiverName)) {
-      if (installmentPlanId) {
-        await supaFetch('/rest/v1/rpc/process_verified_payment', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount?.id||null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'ชื่อผู้รับเงินไม่ใช่ พัชชลัยย์ / Phatchalai'})
-        }).catch(()=>{});
+      if (installmentPlanId && !isPreview) {
+        await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount?.id||null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'ชื่อผู้รับเงินไม่ใช่ พัชชลัยย์ / Phatchalai'})}).catch(()=>{});
       }
       return json(400,{ok:false,code:'RECEIVER_NAME_MISMATCH',message:'ชื่อผู้รับเงินในสลิปไม่ตรงกับ พัชชลัยย์ หรือ Phatchalai จึงไม่นับยอด'});
     }
@@ -324,11 +363,8 @@ exports.handler = async (event) => {
       const expected = normDigits(selectedAccount.account_number);
       const matched = receiver.identifiers.some(v => v === expected || (expected.length >= 8 && v.endsWith(expected)) || (v.length >= 8 && expected.endsWith(v)));
       if (!matched) {
-        if (installmentPlanId) {
-          await supaFetch('/rest/v1/rpc/process_verified_payment', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount.id,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการผ่อน'})
-          }).catch(()=>{});
+        if (installmentPlanId && !isPreview) {
+          await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount.id,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการผ่อน'})}).catch(()=>{});
         }
         return json(400,{ok:false,code:'RECEIVER_ACCOUNT_MISMATCH',message:'สลิปนี้โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการ จึงไม่นับยอด'});
       }
@@ -369,6 +405,18 @@ exports.handler = async (event) => {
 
     const base = (process.env.SUPABASE_URL || '').replace(/\/$/,'');
     const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    const remainingBefore = plan ? Math.max(Number(plan.manual_remaining_amount ?? (Number(plan.agreed_price||0)-Number(plan.paid_amount||0))),0) : null;
+    const counted = ruleStatus === 'counted';
+    const remainingAfter = counted && plan ? Math.max(remainingBefore - Number(amount || 0),0) : remainingBefore;
+
+    if(isPreview){
+      if(!plan||!customer||!counted||!(Number(amount)>0)) return json(400,{ok:false,message:violationReason||'สลิปไม่ผ่านกฎการผ่อน จึงไม่สามารถส่งยอดได้'});
+      const minimalEasy={success:true,data:{amountInSlip:Number(amount),rawSlip:{date:transferDateTime,transRef:reference,sender:{name:payerName},receiver:{name:receiverName,bank:{name:receiverBank}}}}};
+      const approvalToken=signToken({v:1,exp:Date.now()+10*60*1000,planId:plan.id,customerId:customer.id,customerCode:customer.customer_code,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,bankAccountId:selectedAccount?.id||null,remainingBefore,agreedPrice:Number(plan.agreed_price||0),installmentCode:plan.installment_code||`RP-${String(plan.id).slice(0,8).toUpperCase()}`,customerName:customer.facebook_name||null,productName:plan.installment_products?.product_name||'-',cutoffTime:String(plan.cutoff_time||'22:00').slice(0,5),note:plan.note||null,easyslipResponse:minimalEasy});
+      const planPayload={id:plan.id,installmentCode:plan.installment_code||`RP-${String(plan.id).slice(0,8).toUpperCase()}`,customerCode:customer.customer_code,customerName:customer.facebook_name||null,productName:plan.installment_products?.product_name||'-',before:remainingBefore,after:remainingAfter,fullPrice:Number(plan.agreed_price||0),paidBefore:Math.max(Number(plan.agreed_price||0)-remainingBefore,0),status:remainingAfter<=0?'paid':'active',period:`${plan.start_date||'-'} → ${plan.end_date||'-'}`,cutoffTime:String(plan.cutoff_time||'22:00').slice(0,5),note:plan.note||null,bankAccounts:allowedInstallmentAccounts};
+      return json(200,{ok:true,counted:true,ruleStatus:'counted',violationReason:null,approvalToken,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,isDuplicate:false,plan:planPayload});
+    }
+
     let saved = null;
     if (base && key) {
       const rpcResp = await supaFetch('/rest/v1/rpc/process_verified_payment', {
@@ -400,10 +448,6 @@ exports.handler = async (event) => {
       }
       saved = Array.isArray(rpcJson.data) ? rpcJson.data[0] : rpcJson.data;
     }
-
-    const remainingBefore = plan ? Math.max(Number(plan.manual_remaining_amount ?? (Number(plan.agreed_price||0)-Number(plan.paid_amount||0))),0) : null;
-    const counted = ruleStatus === 'counted';
-    const remainingAfter = counted && plan ? Math.max(remainingBefore - Number(amount || 0),0) : remainingBefore;
 
     return json(200, {
       ok:true,
