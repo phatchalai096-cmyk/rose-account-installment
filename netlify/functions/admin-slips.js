@@ -25,6 +25,21 @@ async function readJson(resp) {
   try { data = JSON.parse(text); } catch (_) {}
   return { data, text };
 }
+
+function makeViewToken(id) {
+  const crypto = require('crypto');
+  const secret = String(
+    process.env.SLIP_VIEW_SECRET ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.EASYSLIP_API_KEY || ''
+  );
+  if (!secret) throw new Error('ยังไม่ได้ตั้งค่า secret สำหรับดูสลิปย้อนหลัง');
+  const payload = Buffer.from(JSON.stringify({ id: String(id), exp: Date.now() + 3600000 })).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
 function authHeaders(key, token) {
   return {
     apikey: key,
@@ -200,10 +215,12 @@ exports.handler = async (event) => {
     for (const row of rows) {
       row.view_url = row.view_url || null;
       row.view_error = null;
-      if (row.storage_path) {
-        const signed = await signPath(base, serviceKey, row.storage_path);
-        row.view_url = signed.url;
-        row.view_error = signed.error;
+      if (row.storage_path && row.id && !String(row.id).startsWith('payment-')) {
+        try {
+          row.view_url = `/.netlify/functions/admin-slip-view?id=${encodeURIComponent(row.id)}&token=${encodeURIComponent(makeViewToken(row.id))}`;
+        } catch (e) {
+          row.view_error = e.message || 'สร้างลิงก์ดูสลิปไม่สำเร็จ';
+        }
       }
     }
 
