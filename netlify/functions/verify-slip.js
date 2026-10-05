@@ -162,6 +162,29 @@ async function getJson(resp) {
   return { data, text };
 }
 
+
+function storagePath(path){return String(path||'').split('/').map(encodeURIComponent).join('/');}
+async function archiveSlip(file, meta={}){
+  const base=(process.env.SUPABASE_URL||'').replace(/\/$/,'');
+  const key=process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY||'';
+  if(!base||!key) throw new Error('ยังไม่ได้ตั้งค่า Supabase Secret Key สำหรับเก็บสลิปย้อนหลัง');
+  const safe=String(file.filename||'slip').replace(/[^a-zA-Z0-9._-]/g,'_').slice(-120)||'slip';
+  const now=new Date();
+  const folder=`${now.getUTCFullYear()}/${String(now.getUTCMonth()+1).padStart(2,'0')}`;
+  const path=`${folder}/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+  const up=await fetch(`${base}/storage/v1/object/payment-slips/${storagePath(path)}`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${key}`,'Content-Type':file.mimeType||'application/octet-stream','x-upsert':'false'},body:file.buffer});
+  if(!up.ok){const t=await up.text();throw new Error(`บันทึกไฟล์สลิปย้อนหลังไม่สำเร็จ: ${t||up.statusText}`)}
+  const row={storage_path:path,original_filename:file.filename||'slip',mime_type:file.mimeType||null,size_bytes:Number(file.size||0),customer_code:meta.customerCode||null,customer_id:meta.customerId||null,installment_plan_id:meta.installmentPlanId||null,product_id:meta.productId||null,status:'uploaded',created_at:new Date().toISOString()};
+  const db=await supaFetch('/rest/v1/slip_archive',{method:'POST',headers:{'Content-Type':'application/json','Prefer':'return=representation'},body:JSON.stringify(row)});
+  const j=await getJson(db); if(!db.ok||!Array.isArray(j.data)||!j.data[0]) throw new Error(`บันทึกประวัติสลิปไม่สำเร็จ: ${j.text||db.statusText}`);
+  return j.data[0];
+}
+async function updateSlipArchive(id,patch={}){
+  if(!id)return;
+  const cleanPatch={...patch,updated_at:new Date().toISOString()};
+  await supaFetch(`/rest/v1/slip_archive?id=eq.${encodeURIComponent(id)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(cleanPatch)});
+}
+
 function tokenSecret() {
   return process.env.INSTALLMENT_TOKEN_SECRET || process.env.EASYSLIP_API_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 }
@@ -209,7 +232,6 @@ async function prepareExistingPaymentConversion(reference, customerCode){
   const [ch,cm]=cutoff.split(':').map(Number);
   if((slipDt.hour*60+slipDt.minute)>=((ch||0)*60+(cm||0))) throw new Error(`สลิปผ่อนต้องโอนก่อน ${cutoff} น. (เวลาไทย)`);
   if(!receiverNameAllowed(pay.receiver_name)) throw new Error('ชื่อผู้รับเงินในสลิปไม่ตรงกับ พัชชลัยย์ หรือ Phatchalai');
-  if(!payerMatches(customer,pay.payer_name)) throw new Error('ชื่อผู้โอนไม่ตรงกับลูกค้าที่ได้รับอนุญาตให้ชำระรายการนี้');
   const allowedIds=[plan.required_bank_account_id,plan.required_bank_account_id_2].filter(Boolean);
   if(!pay.bank_account_id || !allowedIds.includes(pay.bank_account_id)) throw new Error('สลิปนี้โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน');
   const aIds=allowedIds.map(x=>encodeURIComponent(x)).join(',');
@@ -253,6 +275,7 @@ async function commitApprovalToken(token, submittedCustomerCode){
   const j=await getJson(resp);
   if(!resp.ok){if(String(j.text||'').includes('DUPLICATE_REFERENCE')||resp.status===409)throw new Error('สลิปนี้ถูกใช้ไปแล้ว ไม่สามารถนับยอดซ้ำได้');throw new Error(`บันทึกรายการลง Supabase ไม่สำเร็จ: ${j.text||resp.statusText}`);}
   const saved=Array.isArray(j.data)?j.data[0]:j.data;
+  await updateSlipArchive(t.archiveId,{status:'counted',rule_status:'counted',payment_submission_id:saved?.id||null,reference:t.reference});
   const after=Math.max(currentRemaining-Number(t.amount||0),0);
   const planStatus=after<=0?'paid':'active';
   return {ok:true,counted:true,ruleStatus:'counted',violationReason:null,amount:Number(t.amount||0),dateTime:t.dateTime||null,localDateTimeLabel:t.localDateTimeLabel||null,reference:t.reference||null,payerName:t.payerName||null,receiverName:t.receiverName||null,receiverBank:t.receiverBank||null,receiverAccount:t.receiverAccount||null,isDuplicate:false,plan:{id:t.planId,installmentCode:t.installmentCode,customerCode:t.customerCode,customerName:t.customerName||current.customers?.facebook_name||null,productName:t.productName||current.installment_products?.product_name||'-',before:currentRemaining,after,status:planStatus},saved};
@@ -260,6 +283,7 @@ async function commitApprovalToken(token, submittedCustomerCode){
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { ok:false, message:'Method Not Allowed' });
+  let archiveId=null;
   try {
     const { file, fields } = await parseMultipart(event);
     const mode=clean(fields.mode)||'commit';
@@ -301,6 +325,10 @@ exports.handler = async (event) => {
     let installmentPlanId = clean(fields.installmentPlanId);
     const productId = clean(fields.productId);
     const isPreview = mode==='preview' && !!installmentPlanId;
+
+    // Keep the original uploaded slip permanently for the admin history.
+    const archived=await archiveSlip(file,{customerCode:submittedCustomerCode,installmentPlanId:installmentPlanId||null,productId:productId||null});
+    archiveId=archived.id;
 
     let selectedAccount = null;
     let allowedInstallmentAccounts = [];
@@ -367,12 +395,13 @@ exports.handler = async (event) => {
     const esText = await esResp.text();
     let es = null; try { es = JSON.parse(esText); } catch {}
     if (!esResp.ok || es?.success !== true) {
+      await updateSlipArchive(archiveId,{status:'easyslip_rejected',violation_reason:es?.error?.message || es?.message || 'EasySlip ตรวจสอบสลิปไม่ผ่าน',easyslip_response:es||null});
       return json(esResp.status || 400, { ok:false, message:es?.error?.message || es?.message || 'EasySlip ตรวจสอบสลิปไม่ผ่าน' });
     }
 
     const d = es.data || {};
     const raw = d.rawSlip || {};
-    if (d.isDuplicate === true) return json(409, { ok:false, code:'DUPLICATE_SLIP', message:'สลิปนี้ถูกตรวจสอบไปแล้ว ไม่สามารถใช้ซ้ำได้' });
+    if (d.isDuplicate === true) { await updateSlipArchive(archiveId,{status:'duplicate',reference:d.transRef||d.transactionId||null,easyslip_response:es||null}); return json(409, { ok:false, code:'DUPLICATE_SLIP', message:'สลิปนี้ถูกตรวจสอบไปแล้ว ไม่สามารถใช้ซ้ำได้' }); }
 
     const sender = getParty(raw, 'sender');
     const receiver = receiverIdentifiers(d, raw);
@@ -382,6 +411,7 @@ exports.handler = async (event) => {
     const amount = d.amountInSlip ?? raw?.amount?.amount ?? null;
     const transferDateTime = raw?.date || null;
     const reference = raw?.transRef || raw?.transactionId || null;
+    await updateSlipArchive(archiveId,{reference,payer_name:payerName||null,receiver_name:receiverName||null,receiver_bank:receiverBank||null,amount:amount==null?null:Number(amount),date_time:transferDateTime||null,easyslip_response:es,status:'verified_waiting'});
 
     // Installment uploads from the public page do not require the customer to choose a channel.
     // Match the verified receiver against either of the two bank accounts configured on the plan.
@@ -394,6 +424,7 @@ exports.handler = async (event) => {
       if (selectedAccount) receiverBank = receiver.bank || selectedAccount.bank_name || null;
       if (!selectedAccount) {
         if(!isPreview){await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({p_payer_name:payerName||null,p_receiver_name:receiverName||null,p_receiver_bank:receiverBank,p_amount:amount==null?null:Number(amount),p_date_time:transferDateTime||null,p_reference:reference||null,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน'}),}).catch(()=>{});}
+        await updateSlipArchive(archiveId,{status:'rejected',rule_status:'receiver_mismatch',violation_reason:'โอนเข้าบัญชีไม่ตรงกับ 2 ช่องทางที่กำหนดของรายการผ่อน'});
         return json(400,{ok:false,code:'RECEIVER_ACCOUNT_MISMATCH',message:'สลิปนี้โอนเข้าบัญชีไม่ตรงกับช่องทางรับเงินที่กำหนดของรายการผ่อน จึงไม่นับยอด'});
       }
     }
@@ -404,10 +435,10 @@ exports.handler = async (event) => {
       const pResp = await supaFetch(q);
       const pJson = await getJson(pResp);
       if (!pResp.ok) return json(500,{ok:false,message:'โหลดรายการผ่อนของสินค้านี้ไม่สำเร็จ'});
-      const candidates = Array.isArray(pJson.data) ? pJson.data.filter(x=>x.customers?.is_active && x.installment_products?.sale_status !== 'sold' && (!x.installment_products?.assigned_customer_id || String(x.installment_products.assigned_customer_id)===String(x.customer_id))) : [];
-      const matches = candidates.filter(x=>payerMatches(x.customers,payerName));
-      if (matches.length === 0) return json(400,{ok:false,code:'PAYER_NOT_ASSIGNED',message:'ไม่พบรายการผ่อนที่กำหนดให้ชำระด้วยชื่อผู้โอนในสลิปนี้'});
-      if (matches.length > 1) return json(409,{ok:false,code:'AMBIGUOUS_PAYER',message:'พบลูกค้าที่ชื่อผู้โอนตรงกันมากกว่า 1 รายการ กรุณาติดต่อร้านเพื่อตรวจสอบ'});
+          const candidates = Array.isArray(pJson.data) ? pJson.data.filter(x=>x.customers?.is_active && x.installment_products?.sale_status !== 'sold' && (!x.installment_products?.assigned_customer_id || String(x.installment_products.assigned_customer_id)===String(x.customer_id))) : [];
+      const matches = candidates.filter(x=>submittedCustomerCode && normText(submittedCustomerCode) === normText(x.customers?.customer_code));
+      if (matches.length === 0) return json(400,{ok:false,code:'CUSTOMER_CODE_REQUIRED',message:'กรุณากรอกรหัสลูกค้าให้ตรงกับรายการผ่อนก่อนส่งยอด'});
+      if (matches.length > 1) return json(409,{ok:false,code:'AMBIGUOUS_PLAN',message:'รหัสลูกค้านี้มีมากกว่า 1 รายการผ่อนของสินค้านี้ กรุณาเลือกรายการผ่อนก่อนส่งยอด'});
       installmentPlanId = matches[0].id;
       plan = matches[0];
       customer = matches[0].customers;
@@ -439,6 +470,7 @@ exports.handler = async (event) => {
       if (installmentPlanId && !isPreview) {
         await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount?.id||null,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'ชื่อผู้รับเงินไม่ใช่ พัชชลัยย์ / Phatchalai'})}).catch(()=>{});
       }
+      await updateSlipArchive(archiveId,{status:'rejected',rule_status:'receiver_mismatch',violation_reason:'ชื่อผู้รับเงินไม่ใช่ พัชชลัยย์ / Phatchalai'});
       return json(400,{ok:false,code:'RECEIVER_NAME_MISMATCH',message:'ชื่อผู้รับเงินในสลิปไม่ตรงกับ พัชชลัยย์ หรือ Phatchalai จึงไม่นับยอด'});
     }
 
@@ -449,6 +481,7 @@ exports.handler = async (event) => {
         if (installmentPlanId && !isPreview) {
           await supaFetch('/rest/v1/rpc/process_verified_payment', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_payer_name:payerName,p_receiver_name:receiverName,p_receiver_bank:receiverBank,p_amount:amount,p_date_time:transferDateTime,p_reference:reference,p_status:'rejected',p_easyslip_response:es,p_bank_account_id:selectedAccount.id,p_month_start:monthStartBangkok(transferDateTime),p_customer_id:customer?.id||null,p_installment_plan_id:installmentPlanId,p_rule_status:'receiver_mismatch',p_violation_reason:'โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการผ่อน'})}).catch(()=>{});
         }
+        await updateSlipArchive(archiveId,{status:'rejected',rule_status:'receiver_mismatch',violation_reason:'โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการผ่อน'});
         return json(400,{ok:false,code:'RECEIVER_ACCOUNT_MISMATCH',message:'สลิปนี้โอนเข้าบัญชีไม่ตรงกับบัญชีประจำรายการ จึงไม่นับยอด'});
       }
     }
@@ -470,9 +503,6 @@ exports.handler = async (event) => {
         if(!today || slipDate!==today){
           ruleStatus='not_today';
           violationReason=`สลิปผ่อนต้องเป็นวันที่ปัจจุบันเท่านั้น (วันนี้ ${today||'-'} แต่สลิปเป็น ${slipDate})`;
-        } else if (!payerMatches(customer, payerName)) {
-          ruleStatus = 'payer_mismatch';
-          violationReason = 'ชื่อผู้โอนไม่ตรงกับลูกค้าที่ได้รับอนุญาตให้ชำระรายการนี้';
         } else {
           const period=isWithinPlanPeriod(transferDateTime,plan.start_date,plan.end_date);
           if(!period.ok){ruleStatus='outside_period';violationReason=period.reason;}
@@ -495,9 +525,10 @@ exports.handler = async (event) => {
     if(isPreview){
       if(!plan||!customer||!counted||!(Number(amount)>0)) return json(400,{ok:false,message:violationReason||'สลิปไม่ผ่านกฎการผ่อน จึงไม่สามารถส่งยอดได้'});
       const minimalEasy={success:true,data:{amountInSlip:Number(amount),rawSlip:{date:transferDateTime,transRef:reference,sender:{name:payerName},receiver:{name:receiverName,bank:{name:receiverBank}}}}};
-      const approvalToken=signToken({v:1,exp:Date.now()+10*60*1000,planId:plan.id,customerId:customer.id,customerCode:customer.customer_code,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,bankAccountId:selectedAccount?.id||null,remainingBefore,agreedPrice:Number(plan.agreed_price||0),installmentCode:plan.installment_code||`RP-${String(plan.id).slice(0,8).toUpperCase()}`,customerName:customer.facebook_name||null,productName:plan.installment_products?.product_name||'-',cutoffTime:String(plan.cutoff_time||'22:00').slice(0,5),note:plan.note||null,easyslipResponse:minimalEasy});
+      const approvalToken=signToken({v:2,exp:Date.now()+10*60*1000,archiveId,planId:plan.id,customerId:customer.id,customerCode:customer.customer_code,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,bankAccountId:selectedAccount?.id||null,remainingBefore,agreedPrice:Number(plan.agreed_price||0),installmentCode:plan.installment_code||`RP-${String(plan.id).slice(0,8).toUpperCase()}`,customerName:customer.facebook_name||null,productName:plan.installment_products?.product_name||'-',cutoffTime:String(plan.cutoff_time||'22:00').slice(0,5),note:plan.note||null,easyslipResponse:minimalEasy});
       const planPayload={id:plan.id,installmentCode:plan.installment_code||`RP-${String(plan.id).slice(0,8).toUpperCase()}`,customerCode:customer.customer_code,customerName:customer.facebook_name||null,productName:plan.installment_products?.product_name||'-',before:remainingBefore,after:remainingAfter,fullPrice:Number(plan.agreed_price||0),paidBefore:Math.max(Number(plan.agreed_price||0)-remainingBefore,0),status:remainingAfter<=0?'paid':'active',period:`${plan.start_date||'-'} → ${plan.end_date||'-'}`,cutoffTime:String(plan.cutoff_time||'22:00').slice(0,5),note:plan.note||null,bankAccounts:allowedInstallmentAccounts};
-      return json(200,{ok:true,counted:true,ruleStatus:'counted',violationReason:null,approvalToken,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,isDuplicate:false,plan:planPayload});
+      await updateSlipArchive(archiveId,{status:'verified_waiting',rule_status:'counted'});
+      return json(200,{ok:true,counted:true,ruleStatus:'counted',violationReason:null,approvalToken,archiveId,amount:Number(amount),dateTime:transferDateTime,localDateTimeLabel:local?`${String(local.day).padStart(2,'0')}/${String(local.month).padStart(2,'0')}/${local.year} ${String(local.hour).padStart(2,'0')}:${String(local.minute).padStart(2,'0')} น.`:null,reference,payerName,receiverName,receiverBank,receiverAccount:selectedAccount?.account_number||null,isDuplicate:false,plan:planPayload});
     }
 
     let saved = null;
@@ -530,6 +561,7 @@ exports.handler = async (event) => {
         throw new Error(`บันทึกรายการลง Supabase ไม่สำเร็จ: ${rpcJson.text || rpcResp.statusText}`);
       }
       saved = Array.isArray(rpcJson.data) ? rpcJson.data[0] : rpcJson.data;
+      await updateSlipArchive(archiveId,{status:counted?'counted':'rejected',rule_status:ruleStatus,violation_reason:violationReason,payment_submission_id:saved?.id||null});
     }
 
     return json(200, {
@@ -556,9 +588,11 @@ exports.handler = async (event) => {
         after:remainingAfter,
         status:counted && remainingAfter<=0 ? 'paid' : plan.status
       } : null,
-      saved
+      saved,
+      archiveId
     });
   } catch (e) {
+    if(archiveId){try{await updateSlipArchive(archiveId,{status:'error',violation_reason:e.message||'Server error'});}catch{}}
     return json(500, { ok:false, message:e.message || 'Server error' });
   }
 };
