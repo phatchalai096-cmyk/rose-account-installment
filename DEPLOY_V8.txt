@@ -1,0 +1,6 @@
+Rose Account Installment V8
+- Customer must enter customer code before installment slip upload.
+- Installment cards have direct Attach Slip button.
+- Public installment upload accepts either of the two bank accounts configured on the installment plan; no channel selection is required.
+- Slip must be dated today in Asia/Bangkok time.
+- Existing features from V7 are included.
