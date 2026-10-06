@@ -354,6 +354,129 @@ function receiverIdentifiers(data, raw) {
   };
 }
 
+/*
+ * QR / PromptPay fallback:
+ * EasySlip บางสลิป โดยเฉพาะสลิปที่จ่ายผ่าน QR
+ * อาจไม่ส่งเลขบัญชีปลายทางมาให้ตรวจเทียบแบบตรง ๆ
+ * ในกรณีนั้นจะใช้ "ชื่อผู้รับ + ธนาคารผู้รับ" เป็นตัวช่วยยืนยัน
+ * แต่ถ้า EasySlip มีเลขบัญชี/Proxy มาแล้ว จะยังบังคับให้เลขตรงกับบัญชีที่เลือก
+ */
+function normalizeBankName(v) {
+  const n = normText(v);
+
+  if (!n) return '';
+
+  const groups = [
+    ['กสิกรไทย', 'kbank', 'kasikorn', 'kasikornbank'],
+    ['ไทยพาณิชย์', 'scb', 'siamcommercial', 'siamcommercialbank'],
+    ['กรุงไทย', 'ktb', 'krungthai', 'krungthaibank'],
+    ['กรุงเทพ', 'bbl', 'bangkokbank'],
+    ['กรุงศรี', 'กรุงศรีอยุธยา', 'bay', 'krungsri', 'krungsribank'],
+    ['ทหารไทยธนชาต', 'ttb', 'tmb', 'thanachart'],
+    ['ออมสิน', 'gsb', 'government savings bank'],
+    ['ธ.ก.ส.', 'baac', 'bank for agriculture'],
+    ['ยูโอบี', 'uob'],
+    ['ซีไอเอ็มบี', 'cimb', 'cimbthai'],
+    ['แลนด์แอนด์เฮ้าส์', 'lhbank', 'land and houses'],
+    ['เกียรตินาคินภัทร', 'kkp', 'kiatnakin'],
+    ['อิสลามแห่งประเทศไทย', 'ibank', 'islamic bank'],
+    ['ทิสโก้', 'tisco'],
+    ['ทรูมันนี่', 'truemoney', 'true money', 'truemoney wallet']
+  ];
+
+  for (const group of groups) {
+    const normalized = group.map(normText);
+    if (normalized.some(x => x && (n === x || n.includes(x) || x.includes(n)))) {
+      return normalized[0];
+    }
+  }
+
+  return n;
+}
+
+function receiverNameMatchesAccount(receiverName, accountName) {
+  const r = normalizePersonName(receiverName);
+  const a = normalizePersonName(accountName);
+
+  if (!r || !a) return false;
+
+  return (
+    r === a ||
+    r.includes(a) ||
+    a.includes(r)
+  );
+}
+
+function receiverBankMatchesAccount(receiverBank, accountBank) {
+  const r = normalizeBankName(receiverBank);
+  const a = normalizeBankName(accountBank);
+
+  if (!r || !a) {
+    return true;
+  }
+
+  return (
+    r === a ||
+    r.includes(a) ||
+    a.includes(r)
+  );
+}
+
+function receiverMatchesSelectedAccount(receiver, selectedAccount) {
+  if (!selectedAccount) return false;
+
+  const expected = normDigits(
+    selectedAccount.account_number
+  );
+
+  /*
+   * Prefer hard account-number / PromptPay matching whenever
+   * EasySlip exposes an identifier.
+   */
+  if (
+    expected &&
+    receiver?.identifiers?.length
+  ) {
+    const matched = receiver.identifiers.some(
+      v =>
+        v === expected ||
+        (
+          expected.length >= 8 &&
+          v.endsWith(expected)
+        ) ||
+        (
+          v.length >= 8 &&
+          expected.endsWith(v)
+        )
+    );
+
+    if (matched) return true;
+
+    /*
+     * มีเลขปลายทางจาก EasySlip แต่เลขไม่ตรง
+     * ห้ามใช้ fallback ชื่อ/ธนาคาร เพราะจะเปิดช่องให้โอนผิดบัญชีผ่านได้
+     */
+    return false;
+  }
+
+  /*
+   * QR fallback:
+   * ถ้า EasySlip ไม่มี identifier สำหรับปลายทาง
+   * ให้ยืนยันด้วยชื่อผู้รับ และธนาคารถ้ามีข้อมูล
+   */
+  const nameMatched = receiverNameMatchesAccount(
+    receiver?.name,
+    selectedAccount.account_name
+  );
+
+  const bankMatched = receiverBankMatchesAccount(
+    receiver?.bank || receiver?.bankShort,
+    selectedAccount.bank_name
+  );
+
+  return nameMatched && bankMatched;
+}
+
 async function supaFetch(path, options = {}) {
   const base =
     (process.env.SUPABASE_URL || '').replace(/\/$/, '');
@@ -523,6 +646,10 @@ async function sendSlipToDiscord(file, meta = {}) {
     ).trim();
 
   if (!webhook) {
+    console.warn(
+      'Discord webhook not configured: DISCORD_WEBHOOK_URL is empty'
+    );
+
     return {
       ok: false,
       skipped: true
@@ -599,6 +726,10 @@ async function sendSlipToDiscord(file, meta = {}) {
         status: resp.status
       };
     }
+
+    console.log(
+      'Discord webhook SENT_OK'
+    );
 
     return {
       ok: true
@@ -2408,41 +2539,12 @@ exports.handler = async (
       !selectedAccount &&
       allowedInstallmentAccounts.length
     ) {
-      const matchesAccountNumber =
-        accountNumber => {
-          const expected =
-            normDigits(
-              accountNumber
-            );
-
-          return (
-            expected &&
-            receiver.identifiers.some(
-              v =>
-                v === expected ||
-                (
-                  expected.length >=
-                    8 &&
-                  v.endsWith(
-                    expected
-                  )
-                ) ||
-                (
-                  v.length >=
-                    8 &&
-                  expected.endsWith(
-                    v
-                  )
-                )
-            )
-          );
-        };
-
       selectedAccount =
         allowedInstallmentAccounts.find(
           a =>
-            matchesAccountNumber(
-              a.account_number
+            receiverMatchesSelectedAccount(
+              receiver,
+              a
             )
         ) ||
         null;
@@ -2931,29 +3033,10 @@ exports.handler = async (
     if (
       selectedAccount
     ) {
-      const expected =
-        normDigits(
-          selectedAccount.account_number
-        );
-
       const matched =
-        receiver.identifiers.some(
-          v =>
-            v === expected ||
-            (
-              expected.length >=
-                8 &&
-              v.endsWith(
-                expected
-              )
-            ) ||
-            (
-              v.length >=
-                8 &&
-              expected.endsWith(
-                v
-              )
-            )
+        receiverMatchesSelectedAccount(
+          receiver,
+          selectedAccount
         );
 
       if (!matched) {
