@@ -134,7 +134,11 @@ main{width:100%;max-width:1100px;}
   </div>
 </div>
 
-<div class="modal" id="receiptModal"><div class="receipt" id="receiptCard"><div class="receipt-head"><div class="check">✓</div><h2>🌸 ชำระเงินสำเร็จ</h2><div class="muted">ตรวจสอบสลิปเรียบร้อยแล้ว</div></div><div class="receipt-body"><div class="receipt-amount"><span>ยอดที่ชำระ</span><strong id="rAmount">0.00 บาท</strong></div><div id="rRows"></div><div class="receipt-actions"><button class="btn" id="saveReceipt">💾 บันทึกใบเสร็จ</button><button class="btn-soft" id="saveSlip">💸 ส่งยอดผ่อน</button><button class="close" id="closeReceipt">ยกเลิก</button></div></div></div></div>
+<div class="modal" id="receiptModal"><div class="receipt" id="receiptCard"><div class="receipt-head"><div class="check">✓</div><h2>🌸 ชำระเงินสำเร็จ</h2><div class="muted">ตรวจสอบสลิปเรียบร้อยแล้ว</div></div><div class="receipt-body"><div class="receipt-amount"><span>ยอดที่ชำระ</span><strong id="rAmount">0.00 บาท</strong></div><div id="rRows"></div><div class="receipt-actions">
+<button class="btn" id="saveReceipt">💾 บันทึกใบเสร็จ</button>
+<button class="close" id="closeReceipt">ปิด</button>
+<button class="btn-soft" id="saveSlip">💸 ส่งยอดผ่อน</button>
+</div></div></div></div>
 <script>
 const $=id=>document.getElementById(id);let banks=[],selectedBank=null,activePlan=null,selectedProductId=null,slipFile=null,lastResult=null,settings={},installmentPreviewToken=null,installmentPreviewData=null,receiptConvertMode=false;
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
