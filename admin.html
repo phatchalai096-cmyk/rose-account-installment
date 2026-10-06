@@ -268,7 +268,78 @@ function renderPlans(){const q=($('planSearch').value||'').toLowerCase(),f=$('pl
 function renderBanks(){$('banksBody').innerHTML=banks.map(b=>`<tr><td>${esc(b.bank_name)}</td><td>${esc(b.account_name)}</td><td>${esc(b.account_number)}</td><td>${b.qr_url?(b.qr_link_url?`<a href="${esc(b.qr_link_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(b.qr_url)}" style="width:70px;height:70px;object-fit:contain;border:1px solid var(--line);border-radius:10px"></a>`:`<img src="${esc(b.qr_url)}" style="width:70px;height:70px;object-fit:contain;border:1px solid var(--line);border-radius:10px">`):'-'}</td><td>${b.is_active?'<span class="badge ok">เปิด</span>':'<span class="badge">ซ่อน</span>'}</td><td><div class="actions"><button class="btn-soft" onclick="editBank('${b.id}')">แก้ไข</button><button class="btn-soft" onclick="toggleBank('${b.id}')">${b.is_active?'ซ่อน':'เปิด'}</button><button class="btn-danger" onclick="deleteBank('${b.id}')">ลบ</button></div></td></tr>`).join('')||'<tr><td colspan="6">ยังไม่มีบัญชี</td></tr>'}
 function statusBadge(r){if(r.rule_status==='counted'||r.status==='verified')return '<span class="badge ok">นับยอด</span>';if(r.rule_status==='late')return '<span class="badge warn">เกินเวลา</span>';return `<span class="badge bad">${esc(r.rule_status||r.status||'ไม่ผ่าน')}</span>`}
 function renderPayments(){const q=($('paySearch').value||'').toLowerCase(),st=$('payStatus').value; $('paymentsBody').innerHTML=payments.filter(p=>(!st||p.rule_status===st||p.status===st)&&`${p.payer_name||''} ${p.receiver_name||''} ${p.reference||''}`.toLowerCase().includes(q)).map(p=>`<tr><td>${new Date(p.created_at).toLocaleString('th-TH')}</td><td>${esc(p.payer_name||'-')}</td><td>${esc(p.receiver_name||'-')}<br><span class="small">${esc(p.receiver_bank||'')}</span></td><td>${esc(p.bank_account_id||'-')}</td><td>${Number(p.amount||0).toLocaleString('th-TH',{minimumFractionDigits:2})} ฿</td><td>${esc(p.reference||'-')}</td><td>${esc(p.violation_reason||'-')}</td><td>${statusBadge(p)}</td></tr>`).join('')||'<tr><td colspan="8">ยังไม่มีรายการ</td></tr>'}
-window.openSlipArchive=async function(url){try{const {data:{session}}=await sb.auth.getSession();if(!session?.access_token)throw new Error('เซสชันหลังบ้านหมดอายุ');const r=await fetch(url,{headers:{Authorization:`Bearer ${session.access_token}`},cache:'no-store'});const blob=await r.blob();if(!r.ok){let msg='เปิดสลิปไม่สำเร็จ';try{const t=await blob.text();const j=JSON.parse(t);msg=j.message||msg}catch(_){}throw new Error(msg)}const obj=URL.createObjectURL(blob);const a=document.createElement('a');a.href=obj;a.target='_blank';a.rel='noopener noreferrer';a.click();setTimeout(()=>URL.revokeObjectURL(obj),60000);}catch(e){toast(e.message||'เปิดสลิปไม่สำเร็จ')}};
+window.openSlipArchive = async function(url) {
+  const viewer = window.open('', '_blank');
+
+  if (!viewer) {
+    toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ กรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้');
+    return;
+  }
+
+  viewer.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>กำลังเปิดสลิป...</title>
+        <style>
+          body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8f5f7;
+            font-family: sans-serif;
+            color: #555;
+          }
+        </style>
+      </head>
+      <body>กำลังเปิดสลิป...</body>
+    </html>
+  `);
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error('เซสชันหลังบ้านหมดอายุ');
+    }
+
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`
+      },
+      cache: 'no-store'
+    });
+
+    const blob = await r.blob();
+
+    if (!r.ok) {
+      let msg = 'เปิดสลิปไม่สำเร็จ';
+
+      try {
+        const text = await blob.text();
+        const data = JSON.parse(text);
+        msg = data.message || msg;
+      } catch (_) {}
+
+      throw new Error(msg);
+    }
+
+    const obj = URL.createObjectURL(blob);
+    viewer.location.href = obj;
+
+    setTimeout(() => {
+      URL.revokeObjectURL(obj);
+    }, 60000);
+
+  } catch (e) {
+    viewer.close();
+    toast(e.message || 'เปิดสลิปไม่สำเร็จ');
+  }
+};
 function renderSlipArchives(){const q=($('slipSearch')?.value||'').trim().toLowerCase();const rows=slipArchives.filter(r=>`${r.customer_code||''} ${r.reference||''} ${r.payer_name||''} ${r.receiver_name||''}`.toLowerCase().includes(q));$('slipsBody').innerHTML=rows.map(r=>{const st=statusBadge({rule_status:r.rule_status,status:r.status});const dt=r.date_time?new Date(r.date_time).toLocaleString('th-TH'):'-';const up=r.created_at?new Date(r.created_at).toLocaleString('th-TH'):'-';return `<tr><td>${esc(up)}</td><td>${esc(dt)}</td><td>${esc(r.customer_code||'-')}</td><td>${esc(r.payer_name||'-')}</td><td>${esc(r.receiver_name||'-')}<br><span class="small">${esc(r.receiver_bank||'')}</span></td><td>${r.amount==null?'-':Number(r.amount).toLocaleString('th-TH',{minimumFractionDigits:2})+' ฿'}</td><td>${esc(r.reference||'-')}</td><td>${st}<br><span class="small">${esc(r.violation_reason||'')}</span></td><td>${r.view_url?`<button class="btn-soft" type="button" onclick='openSlipArchive(${JSON.stringify(r.view_url)})'>👁️ ดูสลิป</button>`:(r.view_error?`<span class="small">${esc(r.view_error)}</span>`:'-')}</td></tr>`}).join('')||'<tr><td colspan="9">ยังไม่มีสลิปย้อนหลัง</td></tr>'}function renderRecent(){const rows=payments.slice(0,8);$('recentBody').innerHTML=rows.map(p=>`<tr><td>${new Date(p.created_at).toLocaleString('th-TH')}</td><td>${esc(p.payer_name||'-')}</td><td>${esc(p.receiver_name||'-')}</td><td>${Number(p.amount||0).toLocaleString()} ฿</td><td>${statusBadge(p)}</td></tr>`).join('')}
 function renderChart(){const arr=monthly.slice(-6);if(!arr.length){$('chart').innerHTML='<div class="muted">ยังไม่มียอดสรุป</div>';return}const max=Math.max(...arr.map(x=>Number(x.total_amount||0)),1);$('chart').innerHTML=arr.map(x=>`<div style="display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%"><div class="bar" style="height:${Math.max(8,Number(x.total_amount||0)/max*140)}px;width:70%"></div><div class="chart-label">${String(x.month_start).slice(0,7)}</div></div>`).join('')}
 function loadDashboard(){const now=new Date();const ym=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;const month=monthly.find(x=>String(x.month_start).startsWith(ym));const cutoff3=new Date();cutoff3.setMonth(cutoff3.getMonth()-2);const m3=monthly.filter(x=>new Date(x.month_start)>=new Date(cutoff3.getFullYear(),cutoff3.getMonth(),1));$('statMonth').textContent=`${Number(month?.total_amount||0).toLocaleString('th-TH',{minimumFractionDigits:2})} ฿`;$('stat3').textContent=`${m3.reduce((a,x)=>a+Number(x.total_amount||0),0).toLocaleString('th-TH',{minimumFractionDigits:2})} ฿`;$('statCount').textContent=payments.filter(p=>p.rule_status==='counted'||p.status==='verified').length;$('statPlans').textContent=plans.filter(p=>p.status==='active').length;renderChart()}
@@ -453,3 +524,6 @@ $('changePass').onclick=async()=>{const old=$('oldPass').value,np=$('newPass').v
 init();
 </script>
 </body></html>
+
+
+ให้แก้บรรทัดไหน
